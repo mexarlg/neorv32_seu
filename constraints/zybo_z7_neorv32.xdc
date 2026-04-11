@@ -148,7 +148,7 @@ set_clock_groups -asynchronous -group [get_clocks sys_clk] \
 # Buttons and switches are asynchronous; prevent the timing analyser from
 # flagging them as timing violations.
 # -----------------------------------------------------------------------------
-set_false_path -from [get_ports { rstn_i }]
+set_false_path -from [get_ports { btn0 }]
 # set_false_path -from [get_ports { btn1_i }]   ;# uncomment when used
 # set_false_path -from [get_ports { sw_i[*] }]  ;# uncomment when used
 
@@ -156,6 +156,5 @@ set_false_path -from [get_ports { rstn_i }]
 # Bitstream configuration — use the Digilent USB programmer (JTAG chain pos 1)
 # -----------------------------------------------------------------------------
 set_property BITSTREAM.GENERAL.COMPRESS    TRUE  [current_design]
-set_property BITSTREAM.CONFIG.SPI_BUSWIDTH 4     [current_design]
 set_property CONFIG_VOLTAGE                3.3   [current_design]
 set_property CFGBVS                        VCCO  [current_design]

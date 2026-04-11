@@ -2,44 +2,470 @@
 
 This project is a student research initiative at **ISAE SUPAERO** focused on improving the fault tolerance of a RISC-V soft-core processor by implementing **Single Event Upset (SEU) mitigation techniques**.
 
-The base processor used in this work is the **NEORV32 RISC-V CPU** (From), which is being extended and modified at the RTL level to study and demonstrate hardware-level reliability improvements.
+The base processor used in this work is the **NEORV32 RISC-V CPU**, which is being extended and modified at the RTL level to study and demonstrate hardware level reliability improvements.
 
----
+The main objective of this project is to investigate and implement architectural and circuit-level mitigation techniques against SEUs, including:
 
-## Project Goals
-
-The main objective of this project is to investigate and implement architectural and circuit-level mitigation techniques against SEUs, including (but not limited to):
-
-- Redundancy based techniques (TMR)
+- Redundancy based techniques (reinforced TMR)
 - Error detection and correction mechanisms for memory and caches (EDAC)
 - Parity bits on registers
-- Fault detection strategies (Watchdog)
+- DLD protection on control logic
+- Fault detection strategies (Watch dog)
 
-This work is part of a broader academic effort to study reliability in digital systems under radiation induced faults.
+
+## 1. How to run things! — Hardware
+
+| Item | Purpose |
+|---|---|
+| Digilent Zybo Z7-20 board | The FPGA development board |
+| USB Micro-B cable | Programs the FPGA bitstream and powers the board |
+| 3.3V USB-to-TTL serial adapter (3.3V) | Communicates with the NEORV32 bootloader over UART |
+| JTAG debug probe (e.g. FTDI FT2232H) | For on-chip GDB debugging |
+
+
+## 2. What You Need — Software
+
+| Tool | Purpose |
+|---|---|
+| Xilinx Vivado (2025.2, free WebPACK edition) | Synthesises RTL and programs the FPGA |
+| RISC-V GCC toolchain (`riscv32-unknown-elf-gcc`) | Compiles C code for the NEORV32 |
+| Python 3 + pyserial | Runs the binary upload script |
+| Make | Runs the NEORV32 build system |
+| PuTTY or minicom | Serial terminal to see UART program output |
+| Git | Version control |
+| WSL2 if using windows | Provides a Linux environment for the build tools |
 
 ---
 
-## Repository Structure
+## 3. Physical Setup — Cables and Connections
 
-- RTL modules of the mitigation techniques are placed under: rtl/seu
-- Testbench simulation files of the mitigation techniques are placed under: sim/tb
-- ModelSim related files for the simulation of the mitigation techniques are placed under: sim/modelsim
-- Vivado projects and files are placed under: /build
-- Constraint files for specific FPGAs are placed under: /constraints
-- Scripts for the generation of Vivado projects or the stimulation of AXI based tests are placed under: scripts
+### 3.1 Power and Programming Cable
 
-## Expected NEORV32 implementation plan
-- Instantiate the NEORV32 on chip debugger top from test_setup.
-- Install the given SW environment of NEORV32.
-- Once the bitstream is implemented, send a simple program test via UART (python script or manually).
-- NEORV32 will start program. Debugging is allowed to check internal modules while functioning.
+Connect the **USB Micro-B cable** between your PC and the **PROG/UART** port on
+the Zybo Z7-20. This single cable both powers the board and allows Vivado to
+program the FPGA.
+
+```
+PC USB port  ──(Micro-B cable)──  Zybo Z7-20  PROG/UART  (J13, near power switch)
+```
+
+Flip the power switch to ON. The green DONE LED should NOT light up yet —
+that only happens after the FPGA is programmed.
+
+### 3.2 UART Serial Adapter — Pmod JB
+
+The NEORV32 UART (used for the bootloader menu and program output) is routed to
+**Pmod JB**. Connect your 3.3V USB-to-TTL adapter to Pmod JB as follows:
+
+```
+Zybo Pmod JB          USB-TTL Adapter
+─────────────         ───────────────
+Pin 1  (T20)  TXD ──→ RXD
+Pin 2  (U20)  RXD ←── TXD
+Pin 5         GND ─── GND
+```
+
+```
+Pmod JB pinout (top view):
+┌─────────────────────────┐
+│  1    2    3    4    5  │  ← top row  (Pin 5 = GND)
+│  7    8    9   10   11  │  ← bottom row
+└─────────────────────────┘
+```
+
+### 3.3 JTAG Debug Probe — Pmod JD
+
+Only needed if you want to use GDB for live debugging. Connect an FTDI-based
+JTAG probe to **Pmod JD**:
+
+```
+Zybo Pmod JD          JTAG Probe
+─────────────         ──────────
+Pin 1  (T14)  TCK ──→ TCK
+Pin 2  (T15)  TDI ──→ TDI
+Pin 3  (P14)  TDO ←── TDO
+Pin 4  (R14)  TMS ──→ TMS
+Pin 5         GND ─── GND
+Pin 6         3V3 ─── VTREF (if your probe needs it)
+```
+
+Pmod JD is on the **right side** of the board, fourth connector from the top.
+
+### 3.4 Reset Button
+
+**BTN0** (the leftmost push button on the board) is wired as the NEORV32 reset.
+Press it at any time to reset the CPU. The bootloader will restart and wait for
+a new upload.
+
+---
+
+## 4. Project Directory Structure
+
+Your repository should be organised as follows. **Do not change these folder
+names** — the TCL script depends on them.
+
+```
+your_project/
+│
+├── rtl/
+│   ├── core/                   ← NEORV32 upstream RTL files (from neorv32/rtl/core/)
+│   │                             Never modify these files.
+│   ├── test_setups/            ← Your top-level wrapper for the Zybo Z7-20
+│   │   └── neorv32_test_setup_on_chip_debugger.vhd
+│   └── seu/                    ← Your SEU protection modules (empty at first)
+│
+├── constraints/
+│   └── zybo_z7_neorv32.xdc     ← Pin assignments for the Zybo Z7-20
+│
+├── scripts/
+│   └── create_project.tcl      ← Vivado project creation script
+│
+├── sw/                         ← Software (from neorv32/sw/)
+│   ├── example/
+│   │   └── hello_world/
+│   └── lib/
+│
+├── build/                     ← Auto-generated by the TCL script, should ignore built files
+│
+└── README.md                   ← This file
+```
+
+---
+
+## 5. Installing the Software Tools
+
+### 5.1 Vivado (all platforms)
+
+1. Go to [https://www.xilinx.com/support/download.html](https://www.xilinx.com/support/download.html)
+2. Download **Vivado ML Edition** (free WebPACK licence is sufficient)
+3. During installation, select only **Zynq-7000** support to save disk space
+4. After installation, open Vivado and activate the free WebPACK licence:
+   `Help → Manage Licence → Get Free WebPACK Licence`
+
+### 5.2 On Windows — Install WSL2 First
+
+All build tools (GCC, Make, Python) run inside WSL2. Open **PowerShell as
+Administrator** and run:
+
+```powershell
+wsl --install
+```
+
+Restart your PC. Ubuntu will finish installing on first launch. Create a
+username and password when prompted. Then open the **Ubuntu** app from the
+Start menu for all following steps.
+
+### 5.3 RISC-V GCC Toolchain
+
+Inside a Linux or WSL2 terminal:
+
+```bash
+# Install build dependencies
+sudo apt update
+sudo apt install make python3 python3-pip git -y
+pip3 install pyserial
+
+# Download the prebuilt NEORV32 toolchain from:
+# https://github.com/stnolting/riscv-gcc-prebuilt/releases
+# Download the file named: riscv32-unknown-elf.gcc-13.2.0.tar.gz (or latest)
+
+# Create install directory and extract
+sudo mkdir -p /opt/riscv
+sudo tar -xzf riscv32-unknown-elf.gcc-13.2.0.tar.gz -C /opt/riscv
+
+# Add to PATH — this makes the compiler available in every terminal session
+echo 'export PATH="/opt/riscv/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+
+# Verify the installation
+riscv32-unknown-elf-gcc --version
+# Expected output: riscv32-unknown-elf-gcc (gc891d8dc23e) 13.2.0 ...
+```
+
+### 5.4 UART Serial Terminal
+
+**On Windows:** Download and install PuTTY from [https://www.putty.org](https://www.putty.org)
+
+**On Linux / WSL2:**
+```bash
+sudo apt install minicom -y
+```
+
+### 5.5 USB Serial Port Access (Linux / WSL2 only)
+
+By default your user cannot open serial ports. Fix this once:
+
+```bash
+sudo usermod -aG dialout $USER
+# Log out and back in for this to take effect
+```
+
+**On WSL2**, the USB adapter also needs to be forwarded from Windows. In
+**PowerShell as Administrator**:
+
+```powershell
+# Install usbipd
+winget install usbipd
+
+# List connected USB devices — find your serial adapter
+usbipd list
+
+# Forward it to WSL2 (replace 2-3 with your actual bus ID from the list above)
+usbipd attach --wsl --busid 2-3
+```
+
+Then inside WSL2, verify it appeared:
+```bash
+ls /dev/ttyUSB*
+# Expected: /dev/ttyUSB0
+```
+
+---
+
+## 6. Creating the Vivado Project
+
+The Vivado project is generated from a TCL script — you never manually add
+files through the GUI. This ensures the project is fully reproducible.
+
+### Step 1 — Open the Vivado TCL Console
+
+Open Vivado. In the main window click **Window → Tcl Console** if it is not
+already visible at the bottom.
+
+### Step 2 — Run the Script
+
+In the TCL console, run the following file:
+
+```tcl
+neorv32_seu/scripts/run_neorv32.tcl
+```
+
+### Step 3 — Open the Generated Project
+
+The project is now at `vivado/neorv32_zybo_z7/`. Vivado may have already
+opened it automatically.
 
 
-## Authors
+---
+
+## 7. Synthesising and Programming the FPGA
+
+### Step 1 — Run Synthesis
+
+In the **Flow Navigator** panel on the left, click **Run Synthesis**.
+This takes 5–15 minutes. When it finishes, click **Open Synthesized Design**
+and check:
+
+- No **errors** in the log (warnings are usually fine)
+- Open **Reports → Utilisation** and save the baseline numbers
+
+### Step 2 — Run Implementation
+
+Click **Run Implementation** in the Flow Navigator. When done, open the
+timing report and confirm **WNS (Worst Negative Slack) is positive or zero**.
+A negative WNS means timing is not met and the design may malfunction.
+
+### Step 3 — Generate Bitstream
+
+Click **Generate Bitstream**. This produces the `.bit` file that programs the
+FPGA. It takes a few minutes.
+
+### Step 4 — Program the FPGA
+
+1. Make sure the Zybo is powered on and connected via USB Micro-B
+2. In Vivado: **Open Hardware Manager → Open Target → Auto Connect**
+3. Vivado should detect `xc7z020_1`
+4. Click **Program Device** → select the `.bit` file → **Program**
+5. The green **DONE** LED on the Zybo should light up
+
+The FPGA now contains the NEORV32. It will start running the bootloader
+immediately and wait for you to upload a program.
+
+> **Note:** the bitstream is loaded into volatile FPGA configuration memory.
+> It is lost when the board is powered off. You need to re-program after every
+> power cycle unless you write the bitstream to the onboard flash.
+---
+
+## 8. Uploading and Running Code on the NEORV32
+
+### Step 1 — Open a Serial Terminal
+
+**On Windows with PuTTY:**
+1. Open Device Manager and find the COM port number for your USB-TTL adapter
+   (listed under "Ports (COM & LPT)")
+2. Open PuTTY → select **Serial**
+3. Serial line: `COM4` (use your actual number)
+4. Speed: `19200`
+5. Click **Open**
+
+**On Linux / WSL2:**
+```bash
+minicom -D /dev/ttyUSB0 -b 19200
+```
+
+Press **BTN0** on the board to reset the CPU. You should see:
+
+```
+<< NEORV32 Bootloader >>
+BLDV: ...
+HWV:  0x01090004
+CLK:  0x05F5E100     ← 100 MHz shown in hex
+...
+Autoboot in 8s. Press any key to abort.
+CMD:>
+```
+
+If you see this, the CPU is alive. If the terminal is blank or shows garbage,
+check the baud rate and the TXD/RXD wiring.
+
+### Step 2 — Compile a Test Program
+
+Open a Linux or WSL2 terminal and navigate to the hello world example:
+
+```bash
+cd your_project/sw/example/hello_world
+
+make RISCV_PREFIX=riscv32-unknown-elf- clean_all exe
+```
+
+This produces a file called `neorv32_exe.bin` in the same folder.
+
+### Step 3 — Upload the Binary
+
+```bash
+python3 ../../image_gen/neorv32-terminal.py \
+    --port /dev/ttyUSB0 \
+    --baud 19200 \
+    --upload neorv32_exe.bin
+```
+
+On Windows, replace `/dev/ttyUSB0` with `COM4` (or your actual port).
+
+The script will automatically press `u` to trigger an upload, send the binary,
+then press `e` to execute it. You should see:
+
+```
+Hello world! :)
+```
+
+### Step 4 — Writing Your Own Programs
+
+Copy an existing example as a starting point:
+
+```bash
+cp -r sw/example/hello_world sw/example/my_test
+cd sw/example/my_test
+```
+
+Edit `main.c`. The NEORV32 HAL provides these commonly used functions:
+
+```c
+#include <neorv32.h>
+
+// Print text over UART
+neorv32_uart0_printf("Value: %d\n", my_value);
+
+// Read/write GPIO
+neorv32_gpio_port_set(0xF);          // set lower 4 bits high (LEDs on)
+uint32_t val = neorv32_gpio_port_get();
+
+// Busy-wait delay
+neorv32_cpu_delay_ms(500);           // wait 500 milliseconds
+```
+
+Compile and upload exactly as in Steps 2 and 3.
+
+---
+
+## 9. Adding SEU Mitigation Modules
+
+When you are ready to start implementing protections, follow this pattern to
+keep your work clean and measurable:
+
+### RTL Placement
+
+Place every new mitigation module in `rtl/seu/`:
+
+```
+rtl/seu/
+├── tmr_voter.vhd          ← example: triple modular redundancy voter
+├── register_scrubber.vhd  ← example: register file scrubbing
+└── ecc_wrapper.vhd        ← example: error correcting code wrapper
+```
+
+The TCL script automatically picks up all `.vhd` files from this folder.
+
+### Workflow for Each New Module
+
+```
+1. Write your module in rtl/seu/my_module.vhd
+         ↓
+2. Verify by creating a testbench and check on ModelSim
+         ↓
+3. Verify again with more complex testbenches!!
+         ↓
+4. Use ip packaging on Vivado and wrap it in AXIL (Master or Slave)
+         ↓
+5. Use ip on block design on Vivado and test it by using JTAG-TO-AXI core
+         ↓
+6. This can easily be done with a TCL script and ILA cores
+         ↓
+7. If more complexity, use the PS (Vitis) to generate the control sequence and check with ILA
+         ↓
+8. If validated, integrate on neorv32_top or neorv32_cpu or top layer depending on module impact
+         ↓
+9. Write bitstream and test with either PS (vitis), C program (neorv32) or TCL script (can use ILA)
+         ↓
+10. Test with neorv32 and check if SEU is mitigated (ILA, debugger)
+         ↓
+11. Check performance change and commit!
+```
+
+---
+
+## 10. Troubleshooting
+
+**Serial terminal is blank after programming**
+- Check TXD/RXD are crossed (board TXD → adapter RXD)
+- Confirm baud rate is exactly 19200
+- Press BTN0 to reset the CPU and resend the bootloader message
+- Verify the USB-TTL adapter appears in Device Manager / `ls /dev/ttyUSB*`
+
+**Vivado says "black box" during synthesis**
+- A VHDL entity was instantiated but its source file was not found
+- Check that all NEORV32 core files are in `rtl/core/`
+- Verify the `library neorv32` property was set by the TCL script
+
+**Timing not met (negative WNS)**
+- Reduce the MMCM output frequency in your top wrapper (e.g. 100 MHz → 80 MHz)
+- Update `CLOCK_FREQUENCY` generic to match the new frequency
+- Re-run implementation
+
+**`make` produces errors about the compiler not being found**
+- Run `riscv32-unknown-elf-gcc --version` to confirm the toolchain is on PATH
+- Re-run `source ~/.bashrc` or open a new terminal
+
+**`permission denied` on `/dev/ttyUSB0`**
+- Run `sudo usermod -aG dialout $USER` then log out and back in
+
+**WSL2 cannot see the serial adapter**
+- Run `usbipd attach --wsl --busid X` in PowerShell as Administrator
+- Re-run after every time you unplug and replug the adapter
+
+**FPGA DONE LED does not light up after programming**
+- Check the bitstream was generated without errors in Vivado
+- Try disconnecting and reconnecting the USB cable, then re-program
+- Confirm Vivado Hardware Manager shows `xc7z020_1` before programming
+
+## Authors - SEU mitigation techniques
+
 - Aldo Lupio
 - Olivier Oribes
 - Teresa Bäurle
 
+## License (NEORV32)
+
 This is an open-source project that is free of charge and provided under an
 permissive [license](https://github.com/stnolting/neorv32/blob/main/LICENSE).
 See the [legal](https://stnolting.github.io/neorv32/#_legal) section for more information.
+
