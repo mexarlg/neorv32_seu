@@ -1,19 +1,6 @@
 # build artifacts
-build/
-*.bin
-*.coe
-*.mem
-*.mif
-*.o
-*.elf
-*.asm
-*.out
-*.hex
-*_image.vhd
-*_wrapper.v
-*.json
-*.cf
-*.dSYM
+build/*
+!build/README.me
 
 # keep default VHDL memory images
 !rtl/core/*_image.vhd
