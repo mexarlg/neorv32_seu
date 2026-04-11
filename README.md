@@ -21,12 +21,19 @@ This work is part of a broader academic effort to study reliability in digital s
 
 ## Repository Structure
 
-RTL modules of the mitigation techniques are placed under: rtl/seu
-Testbench simulation files of the mitigation techniques are placed under: sim/tb
-ModelSim related files for the simulation of the mitigation techniques are placed under: sim/modelsim
-Vivado projects and files are placed under: /build
-Constraint files for specific FPGAs are placed under: /constraints
-Scripts for the generation of Vivado projects or the stimulation of AXI based tests are placed under: scripts
+- RTL modules of the mitigation techniques are placed under: rtl/seu
+- Testbench simulation files of the mitigation techniques are placed under: sim/tb
+- ModelSim related files for the simulation of the mitigation techniques are placed under: sim/modelsim
+- Vivado projects and files are placed under: /build
+- Constraint files for specific FPGAs are placed under: /constraints
+- Scripts for the generation of Vivado projects or the stimulation of AXI based tests are placed under: scripts
+
+## Expected NEORV32 implementation plan
+- Instantiate the NEORV32 on chip debugger top from test_setup.
+- Install the given SW environment of NEORV32.
+- Once the bitstream is implemented, send a simple program test via UART (python script or manually).
+- NEORV32 will start program. Debugging is allowed to check internal modules while functioning.
+
 
 ## Authors
 - Aldo Lupio
