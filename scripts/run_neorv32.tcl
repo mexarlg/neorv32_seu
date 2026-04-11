@@ -8,7 +8,7 @@
 #
 # Expected directory layout (relative to this script's location):
 #   rtl/core/               <- NEORV32 upstream core files (*.vhd)
-#   rtl/system_integration/ <- Your top-level wrapper (*.vhd)
+#   rtl/test_setups/        <- Your top-level wrapper (*.vhd)
 #   rtl/seu/                <- SEU mitigation modules (*.vhd) — can be empty
 #   constraints/            <- XDC file generated alongside this script
 #   scripts/                <- This file lives here

@@ -56,7 +56,7 @@ create_clock -name sys_clk -period 8.000 -waveform {0.000 4.000} [get_ports { cl
 # The NEORV32 rstn_i is ACTIVE LOW — pressing BTN0 should bring the line low.
 # Easiest approach: tie rstn_i = ~btn0 in your wrapper.
 # -----------------------------------------------------------------------------
-set_property -dict { PACKAGE_PIN K18  IOSTANDARD LVCMOS33 } [get_ports { rstn_i }]
+set_property -dict { PACKAGE_PIN K18  IOSTANDARD LVCMOS33 } [get_ports { btn0 }]
 # Note: BTN0 is active-high on board. If rstn_i is wired directly (not inverted
 # in the wrapper), the CPU will be in reset whenever NO button is pressed.
 # It is STRONGLY recommended to invert in the wrapper:
