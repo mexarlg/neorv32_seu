@@ -299,21 +299,23 @@ make RISCV_PREFIX=riscv32-unknown-elf- clean_all exe
 
 Once compiled, this will produce several files:
 (Memory image ~ the program to be run in NEORV32 in machine instructions):
--.elf: Memory image with metadata for the debugger (with variables, symbols...)
--.bin: Memory image on binary to be shared via uart
--.hex: Memory image on hex format for better human understanding of addresses
--.vhdl: Memory image on rtl to be implemented on hardware (code programmed in ROM, already in presynthesis!)
+- .elf: Memory image with metadata for the debugger (with variables, symbols...)
+- .bin: Memory image on binary to be shared via uart
+- .hex: Memory image on hex format for better human understanding of addresses
+- .vhdl: Memory image on rtl to be implemented on hardware (code programmed in ROM, already in presynthesis!)
 
 ### Step 7 — Upload the Binary
 
 Now we have the program compiled, but we need to transfer it to the NEORV32 via bootloader in our case (UART).
-This is done via a bash script:
+This is done with a bash script:
 
+```bash
 # Make executable (only once)
 chmod +x ../../image_gen/uart_upload.sh
 
 # Upload program via uart (path relative from sw/examples, select Uart USB port, .bin is the compiled program on binary)
 ../../image_gen/uart_upload.sh /dev/ttyUSB0 neorv32_exe.bin
+```
 
 The script will automatically press `u` to trigger an upload, send the binary,
 then press `e` to execute it. You should see:
