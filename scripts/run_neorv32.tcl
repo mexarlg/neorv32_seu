@@ -78,6 +78,9 @@ update_compile_order -fileset sources_1
 # 5. Add SEU mitigation source files (directory may be empty initially)
 # -----------------------------------------------------------------------------
 set mit_files [glob -nocomplain "$rtl_dir/seu/*.vhd"]
+# Remove a specific file (e.g., exclude "exclude_me.vhd")
+set mit_files [lsearch -all -inline -not -exact $mit_files "$rtl_dir/seu/project_name.vhd"]
+set mit_files [lsearch -all -inline -not -exact $mit_files "$rtl_dir/seu/project_name_pkg.vhd"]
 
 if {[llength $mit_files] > 0} {
     puts "INFO: Adding [llength $mit_files] mitigation module(s)"
@@ -100,7 +103,7 @@ set_property file_type {VHDL 2008} $all_vhd
 #    Change "neorv32_seu_debugger_top" to match the entity name in your
 #    system_integration wrapper VHDL file.
 # -----------------------------------------------------------------------------
-set top_entity "neorv32_seu_chip_debugger_top"
+set top_entity "neorv32_seu_debugger_top"
 set_property top $top_entity [current_fileset]
 puts "INFO: Top module set to '$top_entity'"
 
