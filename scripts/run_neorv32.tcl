@@ -63,13 +63,13 @@ set_property library neorv32 [get_files $core_files]
 # -----------------------------------------------------------------------------
 # 4. Add your top-level / system-integration source files
 # -----------------------------------------------------------------------------
-set top_files [glob -nocomplain "$rtl_dir/test_setups/neorv32_test_setup_on_chip_debugger.vhd"]
+set top_files [glob -nocomplain "$rtl_dir/top/neorv32_seu_debugger_top.vhd"]
 
 if {[llength $top_files] == 0} {
-    puts "WARNING: No .vhd files found in $rtl_dir/test_setups/ — \
+    puts "WARNING: No .vhd files found in $rtl_dir/top/ — \
           add your top-level wrapper there before running synthesis."
 } else {
-    puts "INFO: Adding [llength $top_files] files from rtl/test_setups/"
+    puts "INFO: Adding [llength $top_files] files from rtl/top/"
     add_files -norecurse $top_files
 }
 update_compile_order -fileset sources_1
@@ -77,13 +77,13 @@ update_compile_order -fileset sources_1
 # -----------------------------------------------------------------------------
 # 5. Add SEU mitigation source files (directory may be empty initially)
 # -----------------------------------------------------------------------------
-set mit_files [glob -nocomplain "$rtl_dir/mitigation/*.vhd"]
+set mit_files [glob -nocomplain "$rtl_dir/seu/*.vhd"]
 
 if {[llength $mit_files] > 0} {
     puts "INFO: Adding [llength $mit_files] mitigation module(s)"
     add_files -norecurse $mit_files
 } else {
-    puts "INFO: rtl/mitigation/ is empty — no mitigation files added yet."
+    puts "INFO: rtl/seu/ is empty — no mitigation files added yet."
 }
 
 # -----------------------------------------------------------------------------
@@ -97,10 +97,10 @@ set_property file_type {VHDL 2008} $all_vhd
 
 # -----------------------------------------------------------------------------
 # 7. Set top-level module
-#    Change "neorv32_test_setup_on_chip_debugger" to match the entity name in your
+#    Change "neorv32_seu_debugger_top" to match the entity name in your
 #    system_integration wrapper VHDL file.
 # -----------------------------------------------------------------------------
-set top_entity "neorv32_test_setup_on_chip_debugger"
+set top_entity "neorv32_seu_chip_debugger_top"
 set_property top $top_entity [current_fileset]
 puts "INFO: Top module set to '$top_entity'"
 

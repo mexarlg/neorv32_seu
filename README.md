@@ -110,9 +110,9 @@ your_project/
 ├── rtl/
 │   ├── core/                   ← NEORV32 upstream RTL files (from neorv32/rtl/core/)
 │   │                             Never modify these files.
-│   ├── test_setups/            ← Your top-level wrapper for the Zybo Z7-20
-│   │   └── neorv32_test_setup_on_chip_debugger.vhd
-│   └── seu/                    ← Your SEU protection modules (empty at first)
+│   ├── top/            ← The top-level wrappers for the Zybo Z7-20
+│   │   └── neorv32_seu_chip_debugger_top.vhd
+│   └── seu/                    ← SEU protection modules
 │
 ├── constraints/
 │   └── zybo_z7_neorv32.xdc     ← Pin assignments for the Zybo Z7-20
@@ -120,7 +120,7 @@ your_project/
 ├── scripts/
 │   └── create_project.tcl      ← Vivado project creation script
 │
-├── sw/                         ← Software (from neorv32/sw/)
+├── sw/                         ← Software examples (from neorv32/sw/)
 │   ├── example/
 │   │   └── hello_world/
 │   └── lib/
@@ -420,42 +420,6 @@ The TCL script automatically picks up all `.vhd` files from this folder.
          ↓
 11. Check performance change and commit!
 ```
-
----
-
-## 10. Troubleshooting
-
-**Serial terminal is blank after programming**
-- Check TXD/RXD are crossed (board TXD → adapter RXD)
-- Confirm baud rate is exactly 19200
-- Press BTN0 to reset the CPU and resend the bootloader message
-- Verify the USB-TTL adapter appears in Device Manager / `ls /dev/ttyUSB*`
-
-**Vivado says "black box" during synthesis**
-- A VHDL entity was instantiated but its source file was not found
-- Check that all NEORV32 core files are in `rtl/core/`
-- Verify the `library neorv32` property was set by the TCL script
-
-**Timing not met (negative WNS)**
-- Reduce the MMCM output frequency in your top wrapper (e.g. 100 MHz → 80 MHz)
-- Update `CLOCK_FREQUENCY` generic to match the new frequency
-- Re-run implementation
-
-**`make` produces errors about the compiler not being found**
-- Run `riscv32-unknown-elf-gcc --version` to confirm the toolchain is on PATH
-- Re-run `source ~/.bashrc` or open a new terminal
-
-**`permission denied` on `/dev/ttyUSB0`**
-- Run `sudo usermod -aG dialout $USER` then log out and back in
-
-**WSL2 cannot see the serial adapter**
-- Run `usbipd attach --wsl --busid X` in PowerShell as Administrator
-- Re-run after every time you unplug and replug the adapter
-
-**FPGA DONE LED does not light up after programming**
-- Check the bitstream was generated without errors in Vivado
-- Try disconnecting and reconnecting the USB cable, then re-program
-- Confirm Vivado Hardware Manager shows `xc7z020_1` before programming
 
 ## Authors - SEU mitigation techniques
 

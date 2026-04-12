@@ -18,14 +18,14 @@ use neorv32.neorv32_package.all;
 entity neorv32_test_setup_on_chip_debugger is
   generic (
     -- adapt these for your setup --
-    CLOCK_FREQUENCY : natural := 125000000; -- clock frequency of clk_i in Hz
+    CLOCK_FREQUENCY : natural := 100000000; -- clock frequency of clk_i in Hz
     IMEM_SIZE       : natural := 16 * 1024; -- size of processor-internal instruction memory in bytes
     DMEM_SIZE       : natural := 8 * 1024   -- size of processor-internal data memory in bytes
   );
   port (
     -- Global control --
-    clk_i : in std_ulogic; -- global clock, rising edge
-    btn0  : in std_ulogic; -- global reset, high-active, async from pushing button
+    clk_i  : in std_ulogic; -- global clock, rising edge
+    rstn_i : in std_ulogic; -- global reset, low-active, async
     -- JTAG on-chip debugger interface --
     jtag_tck_i : in std_ulogic;  -- serial clock
     jtag_tdi_i : in std_ulogic;  -- serial data input
@@ -42,12 +42,8 @@ end entity;
 architecture neorv32_test_setup_on_chip_debugger_rtl of neorv32_test_setup_on_chip_debugger is
 
   signal con_gpio_out : std_ulogic_vector(31 downto 0);
-  signal rstn_i       : std_ulogic;
 
 begin
-
-  -- Button signal should be inverted to have low-active behaviour
-  rstn_i <= not btn0;
 
   -- The Core Of The Problem ----------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
