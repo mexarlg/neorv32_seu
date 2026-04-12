@@ -109,7 +109,7 @@ sudo usermod -aG dialout $USER
 ```
 
 **On WSL2**, the USB adapter also needs to be forwarded from Windows. In
-**PowerShell as Administrator** (usb cables should be connected to be detected):
+**PowerShell as Administrator** (usb cables should be connected to be detected!!!):
 
 ```powershell
 # Install usbipd
@@ -127,7 +127,106 @@ ls /dev/ttyUSB*
 ```
 
 ### 3.5 Install Git and VsCode with extensions etc...
+
 Go to the official web page and install Git into your Windows/Linux system and clone the repository
+
+### 3.6 OpenOCD and On-Chip Debugger (needed for JTAG debugging)
+
+**OpenOCD** runs on your PC and speaks the JTAG protocol over the
+Pmod JD connector to the NEORV32 On-Chip Debugger (OCD) inside the FPGA.
+
+**GDB** is the debugger that connects to OpenOCD and gives you live
+control over the CPU: set breakpoints, inspect registers, read and write
+memory, and manually inject faults to validate SEU mitigations.
+
+Neither tool is needed for basic program upload — they are only used
+during SEU validation and live hardware debugging.
+
+Run all of the following commands from inside your WSL2 terminal.
+
+#### Step 1 — Install build dependencies
+
+```bash
+sudo apt install libtool pkg-config libusb-1.0-0-dev libftdi1-dev \
+  autoconf automake texinfo libjim-dev libhidapi-dev -y
+git clone https://github.com/openocd-org/openocd.git
+cd openocd
+./bootstrap
+./configure --enable-ftdi
+make -j$(nproc)
+sudo make install
+```
+
+> **Note:** Stay inside the `openocd/` folder for all steps above.
+> If you close the terminal and come back later, run `cd openocd` before
+> continuing from where you left off.
+
+#### Step 2 — Verify OpenOCD and GDB
+
+```bash
+openocd --version
+# Expected: Open On-Chip Debugger 0.12.0 or similar
+riscv32-unknown-elf-gdb --version
+# Expected: GNU gdb ... 13.2.0 or similar
+```
+
+---
+
+#### Step 3 - Possible errors if --version fails
+
+**`jimtcl is required but not found via pkg-config`**
+
+```bash
+sudo apt install libjim-dev -y
+./configure --enable-ftdi
+```
+
+If configure still complains about other missing packages, install the
+full dependency set:
+
+```bash
+sudo apt install libtool pkg-config libusb-1.0-0-dev libftdi1-dev \
+  autoconf automake texinfo libjim-dev libhidapi-dev -y
+```
+
+Then run `./bootstrap` again followed by `./configure --enable-ftdi`.
+
+**`riscv32-unknown-elf-gdb: error while loading shared libraries: libpython3.8.so.1.0: cannot open shared object file`**
+
+The prebuilt GDB binary was compiled against Python 3.8 but your Ubuntu
+has a newer version. Fix it by creating a symlink from the available
+Python library to the name GDB is looking for.
+
+First check which Python library you have:
+
+```bash
+ls /usr/lib/x86_64-linux-gnu/libpython*
+```
+
+Then create the symlink pointing to your version (example shows 3.12,
+use whatever version appeared in the output above):
+
+```bash
+sudo ln -s /usr/lib/x86_64-linux-gnu/libpython3.12.so.1.0 \
+           /usr/lib/x86_64-linux-gnu/libpython3.8.so.1.0
+```
+
+Refresh the linker cache and verify:
+
+```bash
+sudo ldconfig
+riscv32-unknown-elf-gdb --version
+```
+
+**`riscv32-unknown-elf-gdb: command not found`**
+
+The toolchain is installed but not on PATH. Fix it:
+
+```bash
+echo 'export PATH="/opt/riscv/bin:$PATH"' >> ~/.bashrc
+source ~/.bashrc
+riscv32-unknown-elf-gdb --version
+```
 
 ---
 
