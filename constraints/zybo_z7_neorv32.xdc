@@ -42,57 +42,60 @@
 
 # -----------------------------------------------------------------------------
 # Clock — 125 MHz PL oscillator
+
 # The Zybo Z7 provides a 125 MHz clock from the Ethernet PHY to PL pin K17.
 # NEORV32 can run at this frequency on the -1 speed grade without issues.
 # Use a MMCM in your top wrapper if you need a different frequency.
-# -----------------------------------------------------------------------------
+
 set_property -dict { PACKAGE_PIN K17  IOSTANDARD LVCMOS33 } [get_ports { clk_i }]
 create_clock -name sys_clk -period 8.000 -waveform {0.000 4.000} [get_ports { clk_i }]
 
 # -----------------------------------------------------------------------------
-# Reset — BTN0 (active-low in NEORV32; button drives HIGH when pressed,
-# so invert in your top-level wrapper or use BTN1 mapped to active-high and
-# invert in the XDC with a PULLDOWN if needed).
-# The NEORV32 rstn_i is ACTIVE LOW — pressing BTN0 should bring the line low.
-# Easiest approach: tie rstn_i = ~btn0 in your wrapper.
-# -----------------------------------------------------------------------------
-set_property -dict { PACKAGE_PIN K18  IOSTANDARD LVCMOS33 } [get_ports { btn0 }]
-# Note: BTN0 is active-high on board. If rstn_i is wired directly (not inverted
-# in the wrapper), the CPU will be in reset whenever NO button is pressed.
-# It is STRONGLY recommended to invert in the wrapper:
-#   rstn_i <= not btn0;  -- CPU runs normally; press BTN0 to reset.
+# BTN0 is active high. RSTN of NEORV32 is active low. This is dealt on top wrapper
+
+set_property -dict { PACKAGE_PIN K18  IOSTANDARD LVCMOS33 } [get_ports { btn0 }]    ;# BTN0
 
 # -----------------------------------------------------------------------------
-# GPIO outputs — mapped to 4 on-board LEDs (LD0–LD3) + 4 Pmod JA pins
-# gpio_o is 64-bit in neorv32_top but only lower 8 bits are used here.
-# LEDs are anode-connected through 330 Ω resistors — logic HIGH = LED ON.
-# -----------------------------------------------------------------------------
+# GPIO LED OUTPUTS — LD0 to LD3 + 4 PMOD JC
+# Mapped to 4 on board LEDs (LD0–LD3) + 4 Pmod JC pins
+# LEDs are anode connected through 330 Ω resistors so logic HIGH = LED ON.
+
 # On-board LEDs
-set_property -dict { PACKAGE_PIN M14  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[0] }]
-set_property -dict { PACKAGE_PIN M15  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[1] }]
-set_property -dict { PACKAGE_PIN G14  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[2] }]
-set_property -dict { PACKAGE_PIN D18  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[3] }]
+set_property -dict { PACKAGE_PIN M14  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[0] }]   ;# LED0
+set_property -dict { PACKAGE_PIN M15  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[1] }]   ;# LED1
+set_property -dict { PACKAGE_PIN G14  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[2] }]   ;# LED2
+set_property -dict { PACKAGE_PIN D18  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[3] }]   ;# LED3
 
-# Pmod JA — pins 1-4 (upper row), useful as additional debug outputs
+# Pmod JC — pins 1-4 (upper row, P1 is top right), useful as additional debug outputs
 # (e.g. connect a logic analyser here for fault injection experiments)
-set_property -dict { PACKAGE_PIN N15  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[4] }]
-set_property -dict { PACKAGE_PIN L14  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[5] }]
-set_property -dict { PACKAGE_PIN K16  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[6] }]
-set_property -dict { PACKAGE_PIN K14  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[7] }]
+set_property -dict { PACKAGE_PIN V15  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[4] }]   ;# PIN1 JC (TOP RIGHT CORNER)
+set_property -dict { PACKAGE_PIN W15  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[5] }]   ;# PIN2 JC
+set_property -dict { PACKAGE_PIN T11  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[6] }]   ;# PIN3 JC
+set_property -dict { PACKAGE_PIN T10  IOSTANDARD LVCMOS33 } [get_ports { gpio_o[7] }]   ;# PIN4 JC
 
 # -----------------------------------------------------------------------------
-# UART0 — Pmod JB (Hi-Speed connector, bank 34)
-# Connect a 3.3V USB-serial adapter here.
-# Pmod JB pinout (top row): JB1=T20, JB2=U20, JB3=V20, JB4=W20
-#                             JB7=Y18, JB8=Y19, JB9=W18, JB10=W19
-#
-# Wiring to a USB-TTL adapter:
-#   JB1 (T20) uart0_txd_o → adapter RXD
-#   JB2 (U20) uart0_rxd_i → adapter TXD
-#   JB5       GND          → adapter GND
-# -----------------------------------------------------------------------------
-set_property -dict { PACKAGE_PIN T20  IOSTANDARD LVCMOS33 } [get_ports { uart0_txd_o }]
-set_property -dict { PACKAGE_PIN U20  IOSTANDARD LVCMOS33 } [get_ports { uart0_rxd_i }]
+# UART-USB Converter JB: (blue card) 
+
+# Ports of blue converter: ("1" on board = Port 1, "J2" = Port 6)
+# "1" RTS Ready to Send
+# "2" RXD Receive
+# "3" TXD Transmit
+# "4" CTS Clear to Send
+# "5" GND Ground
+# "6" SYS3V3 Power Supply (3.3V)
+
+# Jumper switch (blue cap) should be attached to LCL if FPGA is powered on its own!!! (It is!)
+# LED1 of blue converter indicates data from Usb to uart (FPGA). 
+# LD2 of blue converter indicates data from uart (FPGA) to usb.
+
+# Pin 1 to 6 (P1 is "1", P6 is "J2") of blue converter should be connected to Pin 1 to 6 of PMOD JB (P1 is "square", P6 is "3.3V")
+# This is essentially connecting the blue converter onto the TOP ROW of PMOD JB (with blue cap of converter positioned up!)
+
+# Port 2 of converter (RXD) should be connected to TX of uart (FPGA)
+# Port 3 of converter (TXD) should be connected to RX of uart (FPGA)
+
+set_property -dict { PACKAGE_PIN W8  IOSTANDARD LVCMOS33 } [get_ports { uart0_txd_o }]  ;# JB pin 2 → W8
+set_property -dict { PACKAGE_PIN U7  IOSTANDARD LVCMOS33 } [get_ports { uart0_rxd_i }]  ;# JB pin 3 → U7
 
 # -----------------------------------------------------------------------------
 # JTAG — Pmod JD (Hi-Speed connector, bank 34)
@@ -127,9 +130,7 @@ set_clock_groups -asynchronous -group [get_clocks sys_clk] \
 
 # -----------------------------------------------------------------------------
 # Optional: Push buttons (useful for SW-controlled test triggers)
-# BTN0 is already used as reset above.
 # BTN1–BTN3 are available for firmware-controlled test inputs.
-# Uncomment and connect to gpio_i in your wrapper if needed.
 # -----------------------------------------------------------------------------
 # set_property -dict { PACKAGE_PIN P16  IOSTANDARD LVCMOS33 } [get_ports { btn1_i }]
 # set_property -dict { PACKAGE_PIN K19  IOSTANDARD LVCMOS33 } [get_ports { btn2_i }]
