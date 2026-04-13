@@ -109,11 +109,13 @@ sudo usermod -aG dialout $USER
 ```
 
 **On WSL2**, the USB adapter also needs to be forwarded from Windows. In
-**PowerShell as Administrator** (usb cables should be connected to be detected!!!):
+**PowerShell as Administrator** (USB CABLES CONNECTED!!):
 
 ```powershell
 # Install usbipd
 winget install usbipd
+# Verify installation
+usbipd --version
 # List connected USB devices — find your serial adapter
 usbipd list
 # Forward it to WSL2 (replace 2-3 with your actual bus ID from the list above)

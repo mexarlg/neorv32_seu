@@ -56,3 +56,6 @@ riscof_work
 # Reports
 *.rpt
 *.pb
+
+# compilation
+.elf
