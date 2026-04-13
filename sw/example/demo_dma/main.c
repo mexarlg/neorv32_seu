@@ -63,7 +63,7 @@ int main() {
   neorv32_uart0_printf("Descriptor FIFO depth: %u\n", neorv32_dma_get_descriptor_fifo_depth());
 
   // install DMA interrupt handler
-  neorv32_rte_handler_install(DMA_TRAP_CODE, dma_firq_handler);
+  neorv32_rte_handler_install(DMA_RTE_ID, dma_firq_handler);
 
   // enable DMA
   neorv32_dma_enable();
@@ -89,13 +89,13 @@ int main() {
 
   // program DMA transfer descriptor
   dma_rc = neorv32_dma_program(
-    (uint32_t)(&dma_src[0]), // source array base address - byte-aligned
-    (uint32_t)(&dma_dst[0]), // destination array base address - byte-aligned
-    DMA_SRC_INC_BYTE |       // read source data as incrementing bytes
-    DMA_DST_INC_BYTE |       // write destination data as incrementing bytes
-    DMA_BSWAP        |       // swap byte order
-    16                       // number of elements to transfer: 16
-  );
+            (uint32_t)(&dma_src[0]), // source array base address - byte-aligned
+            (uint32_t)(&dma_dst[0]), // destination array base address - byte-aligned
+            DMA_SRC_INC_BYTE |       // read source data as incrementing bytes
+            DMA_DST_INC_BYTE |       // write destination data as incrementing bytes
+            DMA_BSWAP        |       // swap byte order
+            16                       // number of elements to transfer: 16
+           );
 
   if (dma_rc) {
     neorv32_uart0_printf("Programming DMA descriptor failed!\n");
@@ -118,6 +118,7 @@ int main() {
       break;
     }
   }
+  neorv32_dma_done_ack(); // clear DMA-done flag
 
   asm volatile ("fence"); // synchronize caches
 
@@ -141,12 +142,12 @@ int main() {
 
   // program DMA transfer descriptor
   dma_rc = neorv32_dma_program(
-    (uint32_t)(&dma_src[0]), // source array base address - word-aligned
-    (uint32_t)(&dma_dst[0]), // destination array base address - word-aligned
-    DMA_SRC_CONST_WORD     | // read source data as constant word
-    DMA_DST_INC_WORD       | // write destination data as incrementing words
-    4                        // number of elements to transfer: 4
-  );
+             (uint32_t)(&dma_src[0]), // source array base address - word-aligned
+             (uint32_t)(&dma_dst[0]), // destination array base address - word-aligned
+             DMA_SRC_CONST_WORD     | // read source data as constant word
+             DMA_DST_INC_WORD       | // write destination data as incrementing words
+             4                        // number of elements to transfer: 4
+          );
 
   if (dma_rc) {
     neorv32_uart0_printf("Programming DMA descriptor failed!\n");
@@ -169,6 +170,7 @@ int main() {
       break;
     }
   }
+  neorv32_dma_done_ack(); // clear DMA-done flag
 
   asm volatile ("fence"); // synchronize caches
 
@@ -188,48 +190,7 @@ int main() {
   // ----------------------------------------------------------
   // example 3
   // ----------------------------------------------------------
-  neorv32_uart0_printf("\nExample 3: bus error during DMA transfer\n");
-
-  // program DMA transfer descriptor
-  dma_rc = neorv32_dma_program(
-    (uint32_t)(&dma_src[0]),     // source array base address - byte-aligned
-    (uint32_t)(NEORV32_DM_BASE), // destination base address - byte-aligned
-    DMA_SRC_INC_BYTE |           // read source data as incrementing bytes
-    DMA_DST_INC_WORD |           // write destination data as incrementing words
-    DMA_BSWAP        |           // swap byte order
-    4                            // number of elements to transfer: 4
-  );
-
-  if (dma_rc) {
-    neorv32_uart0_printf("Programming DMA descriptor failed!\n");
-    return -1;
-  }
-
-  // trigger DMA transfer
-  neorv32_dma_start();
-
-  // wait for transfer to complete using polling
-  neorv32_uart0_printf("Waiting for DMA... ");
-  while (1) {
-    dma_rc = neorv32_dma_status();
-    if (dma_rc == DMA_STATUS_DONE) {
-      neorv32_uart0_printf("Transfer done.\n");
-      break;
-    }
-    else if (dma_rc == DMA_STATUS_ERROR) {
-      neorv32_uart0_printf("Transfer failed!\n");
-      break;
-    }
-  }
-
-
-  // ----------------------------------------------------------
-  // example 4
-  // ----------------------------------------------------------
-  neorv32_uart0_printf("\nExample 4: byte-to-word transfer using transfer-done interrupt\n");
-
-  // clear any pending DMA interrupt
-  neorv32_dma_irq_ack();
+  neorv32_uart0_printf("\nExample 3: byte-to-word transfer using transfer-done interrupt\n");
 
   // configure DMA interrupt
   neorv32_cpu_csr_set(CSR_MIE, 1 << DMA_FIRQ_ENABLE); // enable DMA interrupt source
@@ -237,12 +198,12 @@ int main() {
 
   // program DMA transfer descriptor
   dma_rc = neorv32_dma_program(
-    (uint32_t)(&dma_src[0]), // source array base address - byte-aligned
-    (uint32_t)(&dma_dst[0]), // destination array base address - word-aligned
-    DMA_SRC_INC_BYTE |       // read source data as incrementing bytes
-    DMA_DST_INC_WORD |       // write destination data as incrementing words
-    4                        // number of elements to transfer: 4
-  );
+             (uint32_t)(&dma_src[0]), // source array base address - byte-aligned
+             (uint32_t)(&dma_dst[0]), // destination array base address - word-aligned
+             DMA_SRC_INC_BYTE |       // read source data as incrementing bytes
+             DMA_DST_INC_WORD |       // write destination data as incrementing words
+             4                        // number of elements to transfer: 4
+           );
 
   if (dma_rc) {
     neorv32_uart0_printf("Programming DMA descriptor failed!\n");
@@ -298,6 +259,6 @@ void show_arrays(void) {
  **************************************************************************/
 void dma_firq_handler(void) {
 
-  neorv32_dma_irq_ack(); // clear DMA-done and DMA-error flags
+  neorv32_dma_done_ack();
   neorv32_uart0_printf("<<DMA interrupt>>\n");
 }

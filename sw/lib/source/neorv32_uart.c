@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -18,32 +18,20 @@
 
 
 /**********************************************************************//**
- * Issue a warning when semihosting redirection is enabled.
- **************************************************************************/
-/**@{*/
-#ifdef UART_SEMIHOSTING
-  #warning All UART data is redirected via semihosting.
-#endif
-/**@}*/
-
-
-/**********************************************************************//**
  * Check if UART unit was synthesized.
  *
  * @param[in,out] Hardware handle to UART register struct, #neorv32_uart_t.
- * @return 0 if UART0/1 was not synthesized, non-zero if UART0/1 is available.
+ * @return 0 if UART0/1 was not synthesized, 1 if UART0/1 is available.
  **************************************************************************/
 int neorv32_uart_available(neorv32_uart_t *UARTx) {
 
-  if (UARTx == NEORV32_UART0) {
-    return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_UART0));
+  if ((UARTx == NEORV32_UART0) && (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_UART0))) {
+    return 1;
   }
-  else if (UARTx == NEORV32_UART1) {
-    return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_UART1));
+  if ((UARTx == NEORV32_UART1) && (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_UART1))) {
+    return 1;
   }
-  else {
-    return 0;
-  }
+  return 0;
 }
 
 
@@ -84,9 +72,9 @@ void neorv32_uart_setup(neorv32_uart_t *UARTx, uint32_t baudrate, uint32_t irq_m
 
   uint32_t tmp = 0;
   tmp |= (uint32_t)(1              & 1U)     << UART_CTRL_EN;
-  tmp |= (uint32_t)(prsc_sel       & 3U)     << UART_CTRL_PRSC_LSB;
-  tmp |= (uint32_t)((baud_div - 1) & 0x3ffU) << UART_CTRL_BAUD_LSB;
-  tmp |= (uint32_t)(irq_mask       & (0xfu   << UART_CTRL_IRQ_RX_NEMPTY));
+  tmp |= (uint32_t)(prsc_sel       & 3U)     << UART_CTRL_PRSC0;
+  tmp |= (uint32_t)((baud_div - 1) & 0x3ffU) << UART_CTRL_BAUD0;
+  tmp |= (uint32_t)(irq_mask & (0x1fU << UART_CTRL_IRQ_RX_NEMPTY));
 
 #ifdef UART0_SIM_MODE
 #warning UART0_SIM_MODE (primary UART) enabled! \
@@ -145,7 +133,7 @@ int neorv32_uart_get_tx_fifo_depth(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_enable(neorv32_uart_t *UARTx) {
 
-  __MMREG32_BSET(UARTx->CTRL, 1 << UART_CTRL_EN);
+  UARTx->CTRL |= ((uint32_t)(1 << UART_CTRL_EN));
 }
 
 
@@ -156,7 +144,7 @@ void neorv32_uart_enable(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_disable(neorv32_uart_t *UARTx) {
 
-  __MMREG32_BCLR(UARTx->CTRL, 1 << UART_CTRL_EN);
+  UARTx->CTRL &= ~((uint32_t)(1 << UART_CTRL_EN));
 }
 
 
@@ -167,7 +155,7 @@ void neorv32_uart_disable(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_rtscts_enable(neorv32_uart_t *UARTx) {
 
-  __MMREG32_BSET(UARTx->CTRL, 1 << UART_CTRL_HWFC_EN);
+  UARTx->CTRL |= ((uint32_t)(1 << UART_CTRL_HWFC_EN));
 }
 
 
@@ -178,7 +166,7 @@ void neorv32_uart_rtscts_enable(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_rtscts_disable(neorv32_uart_t *UARTx) {
 
-  __MMREG32_BCLR(UARTx->CTRL, 1 << UART_CTRL_HWFC_EN);
+  UARTx->CTRL &= ~((uint32_t)(1 << UART_CTRL_HWFC_EN));
 }
 
 
@@ -192,8 +180,31 @@ void neorv32_uart_rtscts_disable(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_putc(neorv32_uart_t *UARTx, char c) {
 
-  while ((UARTx->CTRL & (1<<UART_CTRL_TX_NFULL)) == 0); // wait for free space in TX FIFO
-  neorv32_uart_tx_put(UARTx, c);
+  // wait for previous transfer to finish
+  while ((UARTx->CTRL & (1<<UART_CTRL_TX_FULL))); // wait for free space in TX FIFO
+  UARTx->DATA = (uint32_t)c << UART_DATA_RTX_LSB;
+}
+
+
+/**********************************************************************//**
+ * Clear RX FIFO.
+ *
+ * @param[in,out] UARTx Hardware handle to UART register struct, #neorv32_uart_t.
+ **************************************************************************/
+void neorv32_uart_rx_clear(neorv32_uart_t *UARTx) {
+
+  UARTx->CTRL |= (uint32_t)(1 << UART_CTRL_RX_CLR);
+}
+
+
+/**********************************************************************//**
+ * Clear TX FIFO.
+ *
+ * @param[in,out] UARTx Hardware handle to UART register struct, #neorv32_uart_t.
+ **************************************************************************/
+void neorv32_uart_tx_clear(neorv32_uart_t *UARTx) {
+
+  UARTx->CTRL |= (uint32_t)(1 << UART_CTRL_TX_CLR);
 }
 
 
@@ -201,11 +212,16 @@ void neorv32_uart_putc(neorv32_uart_t *UARTx, char c) {
  * Check if UART TX is busy (transmitter busy or data left in TX buffer).
  *
  * @param[in,out] UARTx Hardware handle to UART register struct, #neorv32_uart_t.
- * @return 0 if idle, non-zero if busy
+ * @return 0 if idle, 1 if busy
  **************************************************************************/
 int neorv32_uart_tx_busy(neorv32_uart_t *UARTx) {
 
-  return (int)(UARTx->CTRL & (1 << UART_CTRL_TX_BUSY));
+  if (UARTx->CTRL & (1 << UART_CTRL_TX_BUSY)) {  // TX engine busy
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -217,7 +233,12 @@ int neorv32_uart_tx_busy(neorv32_uart_t *UARTx) {
  **************************************************************************/
 int neorv32_uart_tx_free(neorv32_uart_t *UARTx) {
 
-  return (int)(UARTx->CTRL & (1<<UART_CTRL_TX_NFULL));
+  if (UARTx->CTRL & (1<<UART_CTRL_TX_FULL)) {
+    return 0;
+  }
+  else {
+    return 1;
+  }
 }
 
 
@@ -229,11 +250,7 @@ int neorv32_uart_tx_free(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_tx_put(neorv32_uart_t *UARTx, char c) {
 
-#ifdef UART_SEMIHOSTING
-  neorv32_semihosting_putc(c);
-#else
   UARTx->DATA = (uint32_t)c << UART_DATA_RTX_LSB;
-#endif
 }
 
 
@@ -247,8 +264,11 @@ void neorv32_uart_tx_put(neorv32_uart_t *UARTx, char c) {
  **************************************************************************/
 char neorv32_uart_getc(neorv32_uart_t *UARTx) {
 
-  while (neorv32_uart_char_received(UARTx) == 0); // wait until data available
-  return neorv32_uart_char_received_get(UARTx);
+  while (1) {
+    if (UARTx->CTRL & (1<<UART_CTRL_RX_NEMPTY)) { // data available?
+      return (char)(UARTx->DATA >> UART_DATA_RTX_LSB);
+    }
+  }
 }
 
 
@@ -259,15 +279,16 @@ char neorv32_uart_getc(neorv32_uart_t *UARTx) {
  * @note Use neorv32_uart_char_received_get(void) to get the char.
  *
  * @param[in,out] UARTx Hardware handle to UART register struct, #neorv32_uart_t.
- * @return non-zero when a char has been received, 0 otherwise.
+ * @return 1 when a char has been received, 0 otherwise.
  **************************************************************************/
 int neorv32_uart_char_received(neorv32_uart_t *UARTx) {
 
-#ifdef UART_SEMIHOSTING
-  return 1;
-#else
-  return (int)(UARTx->CTRL & (1<<UART_CTRL_RX_NEMPTY));
-#endif
+  if (UARTx->CTRL & (1<<UART_CTRL_RX_NEMPTY)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -282,11 +303,7 @@ int neorv32_uart_char_received(neorv32_uart_t *UARTx) {
  **************************************************************************/
 char neorv32_uart_char_received_get(neorv32_uart_t *UARTx) {
 
-#ifdef UART_SEMIHOSTING
-  return neorv32_semihosting_getc();
-#else
   return (char)(UARTx->DATA >> UART_DATA_RTX_LSB);
-#endif
 }
 
 
@@ -301,9 +318,6 @@ char neorv32_uart_char_received_get(neorv32_uart_t *UARTx) {
  **************************************************************************/
 void neorv32_uart_puts(neorv32_uart_t *UARTx, const char *s) {
 
-#ifdef UART_SEMIHOSTING
-  neorv32_semihosting_puts(s);
-#else
   char c = 0;
   while ((c = *s++)) {
     if (c == '\n') {
@@ -311,7 +325,6 @@ void neorv32_uart_puts(neorv32_uart_t *UARTx, const char *s) {
     }
     neorv32_uart_putc(UARTx, c);
   }
-#endif
 }
 
 

@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -49,7 +49,7 @@ void memory_trap_handler(void);
  **************************************************************************/
 int main() {
 
-  char buffer[40];
+  char buffer[8];
   char strtok_delimiter[] = " ";
   int length = 0;
 
@@ -62,10 +62,10 @@ int main() {
 
   // capture all exceptions and give debug info via UART
   neorv32_rte_setup();
-  neorv32_rte_handler_install(TRAP_CODE_L_MISALIGNED, memory_trap_handler);
-  neorv32_rte_handler_install(TRAP_CODE_L_ACCESS, memory_trap_handler);
-  neorv32_rte_handler_install(TRAP_CODE_S_MISALIGNED, memory_trap_handler);
-  neorv32_rte_handler_install(TRAP_CODE_S_ACCESS, memory_trap_handler);
+  neorv32_rte_handler_install(RTE_TRAP_L_MISALIGNED, memory_trap_handler);
+  neorv32_rte_handler_install(RTE_TRAP_L_ACCESS, memory_trap_handler);
+  neorv32_rte_handler_install(RTE_TRAP_S_MISALIGNED, memory_trap_handler);
+  neorv32_rte_handler_install(RTE_TRAP_S_ACCESS, memory_trap_handler);
 
   // disable all interrupt sources
   neorv32_cpu_csr_write(CSR_MIE, 0);
@@ -104,26 +104,22 @@ int main() {
     if ((!strcmp(command, "help")) || (command == NULL)) {
       neorv32_uart0_printf(
         "Available commands:\n"
-        "\n"
-        " help                        - show this text\n"
-        " setup                       - configure memory access width (byte,half,word)\n"
-        " test [address]              - test memory interface at [address]\n"
-        " set [address] [value] [num] - write [value] [num] times to memory starting at [address]\n"
-        " read [address]              - read data from [address]\n"
-        " write [address] [value]     - write [value] to [address]\n"
-        " dump [address]              - hex dump bytes + ASCII starting at [address]\n"
-        " sync                        - synchronize with main memory\n"
-        " exit                        - return to bootloader (if available)\n"
+        " help                         - show this text\n"
+        " setup                        - configure memory access width (byte,half,word)\n"
+        " test [address]               - test memory interface at [address]\n"
+        " set [address] [value] [num]  - write [value] [num] times to memory starting at [address]\n"
+        " read [address]               - read data from [address]\n"
+        " write [address] [value]      - write [value] to [address]\n"
+        " dump [address]               - hex dump bytes + ASCII starting at [address]\n"
+        " sync                         - synchronize with main memory\n"
         "\n"
         "NOTE: [address], [num] and [value] are 32-bit hexadecimal numbers without prefix.\n"
         "      If less than 8 hex chars are entered the remaining MSBs are filled with zeros.\n"
         "\n"
         "Examples:\n"
-        "\n"
         " write 80000020 feedcafe\n"
         " read 00000460\n"
-        " set 80000100 deadc0de 100\n"
-        "\n"
+        " set 80000100 deadc0de 100\n\n"
       );
     }
 
@@ -190,24 +186,6 @@ int main() {
       asm volatile ("fence.i");
       asm volatile ("fence");
       neorv32_uart0_printf("ok\n");
-    }
-
-    else if (!strcmp(command, "exit")) {
-      if (NEORV32_SYSINFO->SOC & (1<<SYSINFO_SOC_BOOTLOADER)) {
-        neorv32_uart0_printf("Returning t0 bootloader...\n");
-        while(neorv32_uart0_tx_busy());
-        const uint32_t boot_addr = (uint32_t)NEORV32_BOOTROM_BASE;
-        asm volatile (
-          "csrw mepc, %[addr] \n"
-          "mret               \n"
-          : : [addr] "r" (boot_addr)
-        );
-        __builtin_unreachable();
-        while (1); // should never be reached
-      }
-      else {
-        neorv32_uart0_printf("Bootloader not available.\n");
-      }
     }
 
     else {

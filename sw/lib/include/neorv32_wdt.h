@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -14,8 +14,8 @@
 #ifndef NEORV32_WDT_H
 #define NEORV32_WDT_H
 
-#include <neorv32.h>
 #include <stdint.h>
+
 
 /**********************************************************************//**
  * @name IO Device: Watchdog Timer (WDT)
@@ -34,8 +34,9 @@ typedef volatile struct __attribute__((packed,aligned(4))) {
 enum NEORV32_WDT_CTRL_enum {
   WDT_CTRL_EN          =  0, /**< WDT control register(0) (r/w): Watchdog enable */
   WDT_CTRL_LOCK        =  1, /**< WDT control register(1) (r/w): Lock write access to control register, clears on reset only */
-  WDT_CTRL_RCAUSE_LO   =  2, /**< WDT control register(2) (r/-): Cause of last system reset - low */
-  WDT_CTRL_RCAUSE_HI   =  3, /**< WDT control register(3) (r/-): Cause of last system reset - high */
+  WDT_CTRL_STRICT      =  2, /**< WDT control register(2) (r/w): Force hardware reset if reset password is incorrect or if write attempt to locked CTRL register */
+  WDT_CTRL_RCAUSE_LO   =  3, /**< WDT control register(3) (r/-): Cause of last system reset - low */
+  WDT_CTRL_RCAUSE_HI   =  4, /**< WDT control register(4) (r/-): Cause of last system reset - high */
 
   WDT_CTRL_TIMEOUT_LSB =  8, /**< WDT control register(8)  (r/w): Timeout value, LSB */
   WDT_CTRL_TIMEOUT_MSB = 31  /**< WDT control register(31) (r/w): Timeout value, MSB */
@@ -65,7 +66,7 @@ enum NEORV32_WDT_RCAUSE_enum {
  **************************************************************************/
 /**@{*/
 int  neorv32_wdt_available(void);
-void neorv32_wdt_setup(uint32_t timeout, int lock);
+void neorv32_wdt_setup(uint32_t timeout, int lock, int strict);
 int  neorv32_wdt_disable(void);
 void neorv32_wdt_feed(uint32_t password);
 void neorv32_wdt_force_hwreset(void);

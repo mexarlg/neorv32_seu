@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -17,11 +17,16 @@
 /**********************************************************************//**
  * Check if TWI unit was synthesized.
  *
- * @return 0 if TWI was not synthesized, non-zero if TWI is available.
+ * @return 0 if TWI was not synthesized, 1 if TWI is available.
  **************************************************************************/
 int neorv32_twi_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_TWI));
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_TWI)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -62,7 +67,7 @@ int neorv32_twi_get_fifo_depth(void) {
  **************************************************************************/
 void neorv32_twi_disable(void) {
 
-  __MMREG32_BCLR(NEORV32_TWI->CTRL, 1 << TWI_CTRL_EN);
+  NEORV32_TWI->CTRL &= ~((uint32_t)(1 << TWI_CTRL_EN));
 }
 
 
@@ -71,40 +76,55 @@ void neorv32_twi_disable(void) {
  **************************************************************************/
 void neorv32_twi_enable(void) {
 
-  __MMREG32_BSET(NEORV32_TWI->CTRL, 1 << TWI_CTRL_EN);
+  NEORV32_TWI->CTRL |= (uint32_t)(1 << TWI_CTRL_EN);
 }
 
 
 /**********************************************************************//**
  * Get current state of SCL bus line.
  *
- * @return non-zero if SCL is high, zero if SCL is low.
+ * @return 1 if SCL is high, 0 if SCL is low.
  **************************************************************************/
 int neorv32_twi_sense_scl(void) {
 
-  return (int)(NEORV32_TWI->CTRL & (1 << TWI_CTRL_SENSE_SCL));
+  if (NEORV32_TWI->CTRL & (1 << TWI_CTRL_SENSE_SCL)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Get current state of SDA bus line.
  *
- * @return non-zero if SDA is high, zero if SDA is low.
+ * @return 1 if SDA is high, 0 if SDA is low.
  **************************************************************************/
 int neorv32_twi_sense_sda(void) {
 
-  return (int)(NEORV32_TWI->CTRL & (1 << TWI_CTRL_SENSE_SDA));
+  if (NEORV32_TWI->CTRL & (1 << TWI_CTRL_SENSE_SDA)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Check if TWI controller is busy (TWI bus engine busy or TX FIFO not empty).
  *
- * @return zero if idle, non-zero if busy
+ * @return 0 if idle, 1 if busy
  **************************************************************************/
 int neorv32_twi_busy(void) {
 
-  return (int)(NEORV32_TWI->CTRL & (1 << TWI_CTRL_BUSY));
+  if (NEORV32_TWI->CTRL & (1 << TWI_CTRL_BUSY)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -127,15 +147,6 @@ int neorv32_twi_get(uint8_t *data) {
 
 
  /**********************************************************************//**
- * Discard oldest entry from RX FIFO (if available).
- **************************************************************************/
-void neorv32_twi_get_discard(void) {
-
-  (void)NEORV32_TWI->DCMD;
-}
-
-
- /**********************************************************************//**
  * TWI transfer: send data byte and also receive data byte.
  *
  * @note Blocking function.
@@ -146,10 +157,19 @@ void neorv32_twi_get_discard(void) {
  **************************************************************************/
 int neorv32_twi_transfer(uint8_t *data, int mack) {
 
+  uint8_t rx_data = 0;
+  int device_ack = 0;
+
   while (NEORV32_TWI->CTRL & (1<<TWI_CTRL_TX_FULL)); // wait for free TX entry
+
   neorv32_twi_send_nonblocking(*data, mack); // send address + R/W (+ host ACK)
-  while (NEORV32_TWI->CTRL & (1 << TWI_CTRL_BUSY)); // wait until idle again
-  return neorv32_twi_get(data);
+
+  do {
+    device_ack = neorv32_twi_get(&rx_data);
+  } while (device_ack == -1); // wait until data available
+
+  *data = rx_data;
+  return device_ack;
 }
 
 

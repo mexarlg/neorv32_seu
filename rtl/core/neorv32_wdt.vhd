@@ -17,14 +17,15 @@ use neorv32.neorv32_package.all;
 
 entity neorv32_wdt is
   port (
-    clk_i       : in  std_ulogic;                    -- global clock line
-    rstn_ext_i  : in  std_ulogic;                    -- external reset, low-active
-    rstn_dbg_i  : in  std_ulogic;                    -- debugger reset, low-active
-    rstn_sys_i  : in  std_ulogic;                    -- system reset, low-active
-    bus_req_i   : in  bus_req_t;                     -- bus request
-    bus_rsp_o   : out bus_rsp_t;                     -- bus response
-    clkgen_i    : in  std_ulogic_vector(7 downto 0); -- prescaled clock enables
-    rstn_o      : out std_ulogic                     -- timeout reset, low_active, sync
+    clk_i       : in  std_ulogic; -- global clock line
+    rstn_ext_i  : in  std_ulogic; -- external reset, low-active
+    rstn_dbg_i  : in  std_ulogic; -- debugger reset, low-active
+    rstn_sys_i  : in  std_ulogic; -- system reset, low-active
+    bus_req_i   : in  bus_req_t;  -- bus request
+    bus_rsp_o   : out bus_rsp_t;  -- bus response
+    clkgen_en_o : out std_ulogic; -- enable clock generator
+    clkgen_i    : in  std_ulogic_vector(7 downto 0);
+    rstn_o      : out std_ulogic  -- timeout reset, low_active, sync
   );
 end neorv32_wdt;
 
@@ -34,17 +35,20 @@ architecture neorv32_wdt_rtl of neorv32_wdt is
   constant reset_pwd_c : std_ulogic_vector(31 downto 0) := x"709d1ab3";
 
   -- Control register bits --
-  constant ctrl_enable_c     : natural :=  0; -- r/w: WDT enable
-  constant ctrl_lock_c       : natural :=  1; -- r/w: lock write access to control register when set
-  constant ctrl_rcause_lo_c  : natural :=  2; -- r/-: cause of last system reset, bit 0, LSB
-  constant ctrl_rcause_hi_c  : natural :=  3; -- r/-: cause of last system reset, bit 1, MSB
-  constant ctrl_timeout_lo_c : natural :=  8; -- r/w: timeout value, bit 0, LSB
-  constant ctrl_timeout_hi_c : natural := 31; -- r/w: timeout value, bit 23, MSB
+  constant ctrl_enable_c      : natural :=  0; -- r/w: WDT enable
+  constant ctrl_lock_c        : natural :=  1; -- r/w: lock write access to control register when set
+  constant ctrl_strict_c      : natural :=  2; -- r/w: force hardware reset if reset password is incorrect or if access to locked config
+  constant ctrl_rcause_lo_c   : natural :=  3; -- r/-: cause of last system reset - low
+  constant ctrl_rcause_hi_c   : natural :=  4; -- r/-: cause of last system reset - high
+  --
+  constant ctrl_timeout_lsb_c : natural :=  8; -- r/w: timeout value LSB
+  constant ctrl_timeout_msb_c : natural := 31; -- r/w: timeout value MSB
 
   -- control register --
   type ctrl_t is record
     enable  : std_ulogic;
     lock    : std_ulogic;
+    strict  : std_ulogic;
     timeout : std_ulogic_vector(23 downto 0);
   end record;
   signal ctrl : ctrl_t;
@@ -70,6 +74,7 @@ begin
       bus_rsp_o    <= rsp_terminate_c;
       ctrl.enable  <= '0'; -- disable WDT after reset
       ctrl.lock    <= '0'; -- unlock after reset
+      ctrl.strict  <= '0';
       ctrl.timeout <= (others => '0');
       reset_wdt    <= '0';
       reset_force  <= '0';
@@ -87,8 +92,9 @@ begin
           if (bus_req_i.addr(2) = '0') then -- control register
             if (ctrl.lock = '0') then -- update configuration only if not locked
               ctrl.enable  <= bus_req_i.data(ctrl_enable_c);
-              ctrl.lock    <= bus_req_i.data(ctrl_lock_c);
-              ctrl.timeout <= bus_req_i.data(ctrl_timeout_hi_c downto ctrl_timeout_lo_c);
+              ctrl.lock    <= bus_req_i.data(ctrl_lock_c) and ctrl.enable; -- lock only if already enabled
+              ctrl.strict  <= bus_req_i.data(ctrl_strict_c);
+              ctrl.timeout <= bus_req_i.data(ctrl_timeout_msb_c downto ctrl_timeout_lsb_c);
             else -- write access attempt to locked CTRL register
               reset_force <= '1';
             end if;
@@ -100,10 +106,11 @@ begin
             end if;
           end if;
         else -- read access
-          bus_rsp_o.data(ctrl_enable_c)                              <= ctrl.enable;
-          bus_rsp_o.data(ctrl_lock_c)                                <= ctrl.lock;
-          bus_rsp_o.data(ctrl_rcause_hi_c downto ctrl_rcause_lo_c)   <= reset_cause;
-          bus_rsp_o.data(ctrl_timeout_hi_c downto ctrl_timeout_lo_c) <= ctrl.timeout;
+          bus_rsp_o.data(ctrl_enable_c)                                <= ctrl.enable;
+          bus_rsp_o.data(ctrl_lock_c)                                  <= ctrl.lock;
+          bus_rsp_o.data(ctrl_rcause_hi_c downto ctrl_rcause_lo_c)     <= reset_cause;
+          bus_rsp_o.data(ctrl_strict_c)                                <= ctrl.strict;
+          bus_rsp_o.data(ctrl_timeout_msb_c downto ctrl_timeout_lsb_c) <= ctrl.timeout;
         end if;
       end if;
     end if;
@@ -115,12 +122,10 @@ begin
   wdt_counter: process(rstn_sys_i, clk_i)
   begin
     if (rstn_sys_i = '0') then
-      prsc_tick   <= '0';
       cnt_inc     <= '0';
       cnt_started <= '0';
       cnt         <= (others => '0');
     elsif rising_edge(clk_i) then
-      prsc_tick   <= clkgen_i(clk_div4096_c); -- clock-enable tick
       cnt_inc     <= prsc_tick and cnt_started; -- clock tick and started
       cnt_started <= ctrl.enable and (cnt_started or prsc_tick); -- start with next clock tick
       if (ctrl.enable = '0') or (reset_wdt = '1') then -- watchdog disabled or reset with correct password
@@ -130,6 +135,10 @@ begin
       end if;
     end if;
   end process wdt_counter;
+
+  -- clock generator --
+  clkgen_en_o <= ctrl.enable; -- enable clock generator
+  prsc_tick   <= clkgen_i(clk_div4096_c); -- clock enable tick
 
   -- timeout detector --
   cnt_timeout <= '1' when (cnt_started = '1') and (cnt = ctrl.timeout) else '0';
@@ -144,7 +153,7 @@ begin
       hw_rst_access  <= '0';
     elsif rising_edge(clk_i) then
       hw_rst_timeout <= ctrl.enable and cnt_timeout and prsc_tick; -- timeout
-      hw_rst_access  <= ctrl.enable and ctrl.lock and reset_force; -- locked and incorrect password
+      hw_rst_access  <= ctrl.enable and ctrl.strict and reset_force; -- strict mode and incorrect password
     end if;
   end process reset_generator;
 
@@ -164,7 +173,7 @@ begin
       elsif (hw_rst_timeout = '1') then
         reset_cause <= "10"; -- reset from watchdog timer
       elsif (hw_rst_access = '1') then
-        reset_cause <= "11"; -- reset from invalid watchdog access (locked or incorrect password)
+        reset_cause <= "11"; -- reset from invalid watchdog access (incorrect password)
       end if;
     end if;
   end process reset_identifier;

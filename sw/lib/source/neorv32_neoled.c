@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2024 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -9,6 +9,10 @@
 /**
  * @file neorv32_neoled.c
  * @brief Smart LED Interface (NEOLED) HW driver source file.
+ *
+ * @note These functions should only be used if the NEOLED unit was synthesized (IO_NEOLED_EN = true).
+ *
+ * @see https://stnolting.github.io/neorv32/sw/files.html
  */
 
 #include <neorv32.h>
@@ -17,29 +21,16 @@
 /**********************************************************************//**
  * Check if NEOLED unit was synthesized.
  *
- * @return 0 if NEOLED was not synthesized, non-zero if NEOLED is available.
+ * @return 0 if NEOLED was not synthesized, 1 if NEOLED is available.
  **************************************************************************/
 int neorv32_neoled_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_NEOLED));
-}
-
-
-/**********************************************************************//**
- * Enable NEOLED controller.
- **************************************************************************/
-void neorv32_neoled_enable(void) {
-
-  __MMREG32_BSET(NEORV32_NEOLED->CTRL, 1 << NEOLED_CTRL_EN);
-}
-
-
-/**********************************************************************//**
- * Disable NEOLED controller.
- **************************************************************************/
-void neorv32_neoled_disable(void) {
-
-  __MMREG32_BCLR(NEORV32_NEOLED->CTRL, 1 << NEOLED_CTRL_EN);
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_NEOLED)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -51,17 +42,19 @@ void neorv32_neoled_disable(void) {
  * @param[in] t_total Number of pre-scaled clock ticks for total bit period (0..31).
  * @param[in] t_high_zero Number of pre-scaled clock ticks to generate high-time for sending a '0' (0..31).
  * @param[in] t_high_one Number of pre-scaled clock ticks to generate high-time for sending a '1' (0..31).
+ * @param[in] irq_mode Interrupt condition (0=IRQ if FIFO is empty, 1=IRQ if FIFO is less than half-full).
  **************************************************************************/
-void neorv32_neoled_setup(uint32_t prsc, uint32_t t_total, uint32_t t_high_zero, uint32_t t_high_one) {
+void neorv32_neoled_setup(uint32_t prsc, uint32_t t_total, uint32_t t_high_zero, uint32_t t_high_one, int irq_mode) {
 
   NEORV32_NEOLED->CTRL = 0; // reset
 
   uint32_t tmp = 0;
-  tmp |= (uint32_t)((1           & 0x01U) << NEOLED_CTRL_EN);        // module enable
-  tmp |= (uint32_t)((prsc        & 0x07U) << NEOLED_CTRL_PRSC_LSB);  // clock prescaler
-  tmp |= (uint32_t)((t_total     & 0x1fU) << NEOLED_CTRL_T_TOT_LSB); // serial data output: total period length for one bit
-  tmp |= (uint32_t)((t_high_zero & 0x1fU) << NEOLED_CTRL_T_0H_LSB);  // serial data output: high-time for sending a '0'
-  tmp |= (uint32_t)((t_high_one  & 0x1fU) << NEOLED_CTRL_T_1H_LSB);  // serial data output: high-time for sending a '1'
+  tmp |= (uint32_t)((1           & 0x01U) << NEOLED_CTRL_EN);         // module enable
+  tmp |= (uint32_t)((prsc        & 0x07U) << NEOLED_CTRL_PRSC0);      // clock pre-scaler
+  tmp |= (uint32_t)((t_total     & 0x1fU) << NEOLED_CTRL_T_TOT_0);    // serial data output: total period length for one bit
+  tmp |= (uint32_t)((t_high_zero & 0x1fU) << NEOLED_CTRL_T_ZERO_H_0); // serial data output: high-time for sending a '0'
+  tmp |= (uint32_t)((t_high_one  & 0x1fU) << NEOLED_CTRL_T_ONE_H_0);  // serial data output: high-time for sending a '1'
+  tmp |= (uint32_t)((irq_mode    & 0x01U) << NEOLED_CTRL_IRQ_CONF);   // interrupt mode
   NEORV32_NEOLED->CTRL = tmp;
 }
 
@@ -72,8 +65,10 @@ void neorv32_neoled_setup(uint32_t prsc, uint32_t t_total, uint32_t t_high_zero,
  *
  * @note WS2812 timing: T_period = 1.2us, T_high_zero = 0.4us, T_high_one = 0.8us. Change the constants if required.
  * @note This function uses the SYSINFO_CLK value (from the SYSINFO HW module) to do the timing computations.
+ *
+ * @param[in] irq_mode Interrupt condition (0=IRQ if FIFO is empty, 1=IRQ if FIFO is less than half-full).
  **************************************************************************/
-void neorv32_neoled_setup_ws2812(void) {
+void neorv32_neoled_setup_ws2812(int irq_mode) {
 
   // WS2812 timing
   const uint32_t T_TOTAL_C  = 1200; // ns
@@ -123,7 +118,21 @@ void neorv32_neoled_setup_ws2812(void) {
   }
 
   // set raw configuration
-  neorv32_neoled_setup(clk_prsc_sel, t_total, t_high_zero, t_high_one);
+  neorv32_neoled_setup(clk_prsc_sel, t_total, t_high_zero, t_high_one, irq_mode);
+}
+
+
+/**********************************************************************//**
+ * Set NEOLED mode (24-bit RGB / 32-bit RGBW).
+ *
+ * @param[in] mode 0 = 24-bit mode (RGB), 1 = 32-bit mode (RGBW)
+ **************************************************************************/
+void neorv32_neoled_set_mode(uint32_t mode) {
+
+  uint32_t ctrl = NEORV32_NEOLED->CTRL;
+  ctrl &= ~(0b1 << NEOLED_CTRL_MODE); // clear current mode
+  ctrl |= ((mode & 1) << NEOLED_CTRL_MODE); // set new mode
+  NEORV32_NEOLED->CTRL = ctrl;
 }
 
 
@@ -132,9 +141,13 @@ void neorv32_neoled_setup_ws2812(void) {
  **************************************************************************/
 void neorv32_neoled_strobe_blocking(void) {
 
-  // wait for FIFO full flag to clear
-  while (NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_FULL));
-  NEORV32_NEOLED->STROBE = 0; // just write any data
+  while(1) { // wait for FIFO full flag to clear
+    if ((NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_FULL)) == 0) {
+      break;
+    }
+  }
+
+  neorv32_neoled_strobe_nonblocking();
 }
 
 
@@ -143,55 +156,49 @@ void neorv32_neoled_strobe_blocking(void) {
  **************************************************************************/
 void neorv32_neoled_strobe_nonblocking(void) {
 
-  NEORV32_NEOLED->STROBE = 0; // just write any data
+  const uint32_t mask = 1 << NEOLED_CTRL_STROBE; // strobe bit
+  uint32_t ctrl = NEORV32_NEOLED->CTRL;
+
+  NEORV32_NEOLED->CTRL = ctrl | mask; // set strobe bit
+  NEORV32_NEOLED->DATA = 0; // send any data to trigger strobe command
+  NEORV32_NEOLED->CTRL = ctrl & (~mask); // clear strobe bit
 }
 
 
 /**********************************************************************//**
- * Send single RGBW data word to NEOLED module (blocking).
- *
- * @param[in] 32-bit RGBW data
+ * Enable NEOLED controller.
  **************************************************************************/
-void neorv32_neoled_write32_blocking(uint32_t data) {
+void neorv32_neoled_enable(void) {
 
-  // wait for FIFO full flag to clear
-  while (NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_FULL));
-  NEORV32_NEOLED->DATA32 = data;
+  NEORV32_NEOLED->CTRL |= ((uint32_t)(1 << NEOLED_CTRL_EN));
 }
 
 
 /**********************************************************************//**
- * Send single RGBW data word to NEOLED module (non-blocking).
- *
- * @param[in] 32-bit RGBW data
+ * Disable NEOLED controller.
  **************************************************************************/
-void neorv32_neoled_write32_nonblocking(uint32_t data) {
+void neorv32_neoled_disable(void) {
 
-  NEORV32_NEOLED->DATA32 = data;
+  NEORV32_NEOLED->CTRL &= ~((uint32_t)(1 << NEOLED_CTRL_EN));
 }
 
 
 /**********************************************************************//**
- * Send single RGB data word to NEOLED module (blocking).
+ * Send single RGB(W) data word to NEOLED module (blocking).
  *
- * @param[in] LSB-aligned 24-bit RGBW data
- **************************************************************************/
-void neorv32_neoled_write24_blocking(uint32_t data) {
-
-  // wait for FIFO full flag to clear
-  while (NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_FULL));
-  NEORV32_NEOLED->DATA24 = data;
-}
-
-
-/**********************************************************************//**
- * Send single RGB data word to NEOLED module (non-blocking).
+ * @warning This function is blocking as it polls the NEOLED FIFO full flag.
  *
- * @param[in] LSB-aligned 24-bit RGBW data
+ * @param[in] data LSB-aligned 24-bit RGB or 32-bit RGBW data
  **************************************************************************/
-void neorv32_neoled_write24_nonblocking(uint32_t data) {
+void neorv32_neoled_write_blocking(uint32_t data) {
 
-  NEORV32_NEOLED->DATA24 = data;
+  while(1) { // wait for FIFO full flag to clear
+    if ((NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_FULL)) == 0) {
+      break;
+    }
+  }
+
+  neorv32_neoled_write_nonblocking(data); // send new LED data
 }
 
 
@@ -200,41 +207,11 @@ void neorv32_neoled_write24_nonblocking(uint32_t data) {
  *
  * @return Number of entries in NEOLED TX buffer.
  **************************************************************************/
-int neorv32_neoled_get_fifo_depth(void) {
+uint32_t neorv32_neoled_get_buffer_size(void) {
 
-  uint32_t tmp = (NEORV32_NEOLED->CTRL >> NEOLED_CTRL_FIFO_LSB) & 0xfu;
-  return (int)(1 << tmp);
-}
+  uint32_t tmp = NEORV32_NEOLED->CTRL;
+  tmp = tmp >> NEOLED_CTRL_BUFS_0;
+  tmp = tmp & 0xf; // isolate buffer size bits
 
-
-/**********************************************************************//**
- * Check if TX FIFO is full.
- *
- * @return 0 if FIFO is not full, non-zero if FIFO is full
- **************************************************************************/
-int neorv32_neoled_fifo_full(void) {
-
-  return (int)(NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_FULL));
-}
-
-
-/**********************************************************************//**
- * Check if TX FIFO is empty.
- *
- * @return 0 if FIFO is not empty, non-zero if FIFO is empty.
- **************************************************************************/
-int neorv32_neoled_fifo_empty(void) {
-
-  return (int)(NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_EMPTY));
-}
-
-
-/**********************************************************************//**
- * Check if NEOLED is busy (sending stuff).
- *
- * @return 0 if NEOLED is idle, non-zero if NEOLED is busy.
- **************************************************************************/
-int neorv32_neoled_busy(void) {
-
-  return (int)(NEORV32_NEOLED->CTRL & (1 << NEOLED_CTRL_TX_BUSY));
+  return (1 << tmp); // num entries = pow(2, buffer size flags)
 }

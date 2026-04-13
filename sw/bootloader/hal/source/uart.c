@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -16,6 +16,7 @@
 #include <uart.h>
 
 
+
 /**********************************************************************//**
  * Read single char from UART0.
  *
@@ -23,7 +24,7 @@
  **************************************************************************/
 char uart_getc(void) {
 
-#if (UART_EN == 1)
+#if (UART_EN != 0)
   if (neorv32_uart_available(NEORV32_UART0)) {
     return neorv32_uart_getc(NEORV32_UART0);
   }
@@ -41,7 +42,7 @@ char uart_getc(void) {
  **************************************************************************/
 void uart_putc(char c) {
 
-#if (UART_EN == 1)
+#if (UART_EN != 0)
   if (neorv32_uart_available(NEORV32_UART0)) {
     if (c == '\n') {
       neorv32_uart_putc(NEORV32_UART0, '\r');
@@ -59,7 +60,7 @@ void uart_putc(char c) {
  **************************************************************************/
 void uart_puts(const char *s) {
 
-#if (UART_EN == 1)
+#if (UART_EN != 0)
   char c = 0;
   while ((c = *s++)) {
     uart_putc(c);
@@ -75,8 +76,8 @@ void uart_puts(const char *s) {
  **************************************************************************/
 void uart_puth(uint32_t num) {
 
-#if (UART_EN == 1)
-  static const char hex_symbols[16] = "0123456789ABCDEF";
+#if (UART_EN != 0)
+  static const char hex_symbols[16] = "0123456789abcdef";
   uart_putc('0');
   uart_putc('x');
 
@@ -89,40 +90,21 @@ void uart_puth(uint32_t num) {
 
 
 /**********************************************************************//**
- * Setup UART device for executable streaming. Just a dummy.
- *
- * @return 0 if success, !=0 if error
- **************************************************************************/
-int uart_setup(void) {
-
-#if (UART_EN == 1)
-  return 0; // nothing to do here
-#else
-  return 1;
-#endif
-}
-
-
-/**********************************************************************//**
  * Read 32-bit binary word from UART0.
  *
  * @param[in,out] rdata Pointer for returned data (uint32_t).
  * @return 0 if success, != 0 if error
  **************************************************************************/
-int uart_stream_get(uint32_t* rdata) {
+int uart_getw(uint32_t* rdata) {
 
-#if (UART_EN == 1)
+#if (UART_EN != 0)
   int i;
   subwords32_t tmp;
   for (i=0; i<4; i++) {
     tmp.uint8[i] = (uint8_t)uart_getc();
   }
   *rdata = tmp.uint32;
-#if (UART_OVERFLOW == 1)
-  return (int)(NEORV32_UART0->CTRL & (1<<UART_CTRL_RX_OVER)); ; // RX overflow?
-#else
   return 0;
-#endif
 #else
   return 1;
 #endif

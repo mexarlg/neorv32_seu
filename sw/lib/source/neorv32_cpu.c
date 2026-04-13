@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -12,6 +12,28 @@
  */
 
 #include <neorv32.h>
+
+
+/**********************************************************************//**
+ * Unavailable extensions warnings.
+ **************************************************************************/
+/**@{*/
+#if defined __riscv_d || (__riscv_flen == 64)
+  #error Double-precision floating-point extension D/Zdinx is NOT supported!
+#endif
+
+#if (__riscv_xlen > 32)
+  #error Only XLEN=32 (rv32) is supported!
+#endif
+
+#ifdef __riscv_fdiv
+  #warning Floating-point division instruction FDIV is NOT supported!
+#endif
+
+#ifdef __riscv_fsqrt
+  #warning Floating-point square root instruction FSQRT is NOT supported!
+#endif
+/**@}*/
 
 
 /**********************************************************************//**
@@ -120,7 +142,11 @@ uint32_t neorv32_cpu_pmp_get_num_regions(void) {
   neorv32_cpu_csr_write(CSR_PMPCFG3, mask);
 
   // sum up all written ones (only available PMPCFG* CSRs/entries will return =! 0)
-  subwords32_t cnt;
+  union {
+    uint32_t uint32;
+    uint8_t  uint8[sizeof(uint32_t)/sizeof(uint8_t)];
+  } cnt;
+
   cnt.uint32 = 0;
   cnt.uint32 += neorv32_cpu_csr_read(CSR_PMPCFG0) & mask;
   cnt.uint32 += neorv32_cpu_csr_read(CSR_PMPCFG1) & mask;
@@ -334,36 +360,6 @@ uint32_t neorv32_cpu_hpm_get_size(void) {
   while (tmp) {
     cnt++;
     tmp >>= 1;
-  }
-
-  return cnt;
-}
-
-
-/**********************************************************************//**
- * Hardware trigger module: get number of implemented triggers.
- *
- * @return Number of HW triggers (0 if not implemented at all).
- **************************************************************************/
-int neorv32_cpu_hwtrig_get_number(void) {
-
-  int cnt = 0;
-  uint32_t sel = 0;
-
-  if ((neorv32_cpu_csr_read(CSR_MXISA) & (1<<CSR_MXISA_SDTRIG)) == 0) {
-    return 0;
-  }
-
-  while (1) {
-    neorv32_cpu_csr_write(CSR_TSELECT, sel);
-    if ((neorv32_cpu_csr_read(CSR_TSELECT) == sel) &&
-       ((neorv32_cpu_csr_read(CSR_TINFO) & 0x0000FFFF) != 1)) {
-      cnt++;
-    }
-    else {
-      break;
-    }
-    sel++;
   }
 
   return cnt;

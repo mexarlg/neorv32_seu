@@ -17,17 +17,18 @@ use neorv32.neorv32_package.all;
 
 entity neorv32_onewire is
   generic (
-    ONEWIRE_FIFO : natural range 1 to 2**15 -- RTX FIFO depth, has to be a power of two, min 1
+    ONEWIRE_FIFO : natural range 1 to 2**15 -- RTX fifo depth, has to be a power of two, min 1
   );
   port (
-    clk_i     : in  std_ulogic;                    -- global clock line
-    rstn_i    : in  std_ulogic;                    -- global reset line, low-active
-    bus_req_i : in  bus_req_t;                     -- bus request
-    bus_rsp_o : out bus_rsp_t;                     -- bus response
-    clkgen_i  : in  std_ulogic_vector(7 downto 0); -- prescaled clock enables
-    onewire_i : in  std_ulogic;                    -- 1-wire line state
-    onewire_o : out std_ulogic;                    -- 1-wire line pull-down
-    irq_o     : out std_ulogic                     -- transfer done IRQ
+    clk_i       : in  std_ulogic; -- global clock line
+    rstn_i      : in  std_ulogic; -- global reset line, low-active
+    bus_req_i   : in  bus_req_t;  -- bus request
+    bus_rsp_o   : out bus_rsp_t;  -- bus response
+    clkgen_en_o : out std_ulogic; -- enable clock generator
+    clkgen_i    : in  std_ulogic_vector(7 downto 0);
+    onewire_i   : in  std_ulogic; -- 1-wire line state
+    onewire_o   : out std_ulogic; -- 1-wire line pull-down
+    irq_o       : out std_ulogic  -- transfer done IRQ
   );
 end neorv32_onewire;
 
@@ -51,8 +52,8 @@ architecture neorv32_onewire_rtl of neorv32_onewire is
   constant ctrl_clkdiv0_c    : natural :=  4; -- r/w: clock divider bit 0
   constant ctrl_clkdiv7_c    : natural := 11; -- r/w: clock divider bit 7
   --
-  constant ctrl_fifo_size0_c : natural := 15; -- r/-: log2(FIFO size), bit 0 (LSB)
-  constant ctrl_fifo_size3_c : natural := 18; -- r/-: log2(FIFO size), bit 3 (MSB)
+  constant ctrl_fifo_size0_c : natural := 15; -- r/-: log2(fifo size), bit 0 (lsb)
+  constant ctrl_fifo_size3_c : natural := 18; -- r/-: log2(fifo size), bit 3 (msb)
   --
   constant ctrl_tx_full_c    : natural := 28; -- r/-: TX FIFO full
   constant ctrl_rx_avail_c   : natural := 29; -- r/-: RX FIFO data available
@@ -146,14 +147,16 @@ begin
       -- read access --
       if (bus_req_i.stb = '1') and (bus_req_i.rw = '0') then
         if (bus_req_i.addr(2) = '0') then -- control register
-          bus_rsp_o.data(ctrl_en_c)                                  <= ctrl.enable;
-          bus_rsp_o.data(ctrl_prsc1_c downto ctrl_prsc0_c)           <= ctrl.clk_prsc;
-          bus_rsp_o.data(ctrl_clkdiv7_c downto ctrl_clkdiv0_c)       <= ctrl.clk_div;
+          bus_rsp_o.data(ctrl_en_c)                            <= ctrl.enable;
+          bus_rsp_o.data(ctrl_prsc1_c downto ctrl_prsc0_c)     <= ctrl.clk_prsc;
+          bus_rsp_o.data(ctrl_clkdiv7_c downto ctrl_clkdiv0_c) <= ctrl.clk_div;
+          --
           bus_rsp_o.data(ctrl_fifo_size3_c downto ctrl_fifo_size0_c) <= std_ulogic_vector(to_unsigned(log2_fifo_size_c, 4));
-          bus_rsp_o.data(ctrl_tx_full_c)                             <= not fifo.tx_free;
-          bus_rsp_o.data(ctrl_rx_avail_c)                            <= fifo.rx_avail;
-          bus_rsp_o.data(ctrl_sense_c)                               <= serial.wire_in(1);
-          bus_rsp_o.data(ctrl_busy_c)                                <= fifo.tx_avail or serial.busy;
+          --
+          bus_rsp_o.data(ctrl_tx_full_c)  <= not fifo.tx_free;
+          bus_rsp_o.data(ctrl_rx_avail_c) <= fifo.rx_avail;
+          bus_rsp_o.data(ctrl_sense_c)    <= serial.wire_in(1);
+          bus_rsp_o.data(ctrl_busy_c)     <= fifo.tx_avail or serial.busy;
         else -- data register
           bus_rsp_o.data(dcmd_msb_c downto dcmd_lsb_c) <= fifo.rx_rdata(7 downto 0);
           bus_rsp_o.data(dcmd_pres_c)                  <= fifo.rx_rdata(8);
@@ -168,17 +171,21 @@ begin
   -- -------------------------------------------------------------------------------------------
 
   -- TX FIFO --
-  tx_fifo_inst: entity neorv32.neorv32_prim_fifo
+  tx_fifo_inst: entity neorv32.neorv32_fifo
   generic map (
-    AWIDTH  => log2_fifo_size_c,
-    DWIDTH  => 10, -- 2-bit command + 8-bit data
-    OUTGATE => false
+    FIFO_DEPTH => ONEWIRE_FIFO,
+    FIFO_WIDTH => 10, -- 2-bit command + 8-bit data
+    FIFO_RSYNC => true,
+    FIFO_SAFE  => true,
+    FULL_RESET => false
   )
   port map (
-    -- global control --
+    -- control and status --
     clk_i   => clk_i,
     rstn_i  => rstn_i,
     clear_i => fifo.tx_clr,
+    half_o  => open,
+    level_o => open,
     -- write port --
     wdata_i => fifo.tx_wdata,
     we_i    => fifo.tx_we,
@@ -196,17 +203,21 @@ begin
 
 
   -- RX FIFO --
-  rx_fifo_inst: entity neorv32.neorv32_prim_fifo
+  rx_fifo_inst: entity neorv32.neorv32_fifo
   generic map (
-    AWIDTH  => log2_fifo_size_c,
-    DWIDTH  => 9, -- 1-bit presence status + 8-bit data
-    OUTGATE => false
+    FIFO_DEPTH => ONEWIRE_FIFO,
+    FIFO_WIDTH => 9, -- 1-bit presence status + 8-bit data
+    FIFO_RSYNC => true,
+    FIFO_SAFE  => true,
+    FULL_RESET => false
   )
   port map (
-    -- global control --
+    -- control --
     clk_i   => clk_i,
     rstn_i  => rstn_i,
     clear_i => fifo.rx_clr,
+    half_o  => open,
+    level_o => open,
     -- write port --
     wdata_i => fifo.rx_wdata,
     we_i    => fifo.rx_we,
@@ -257,6 +268,9 @@ begin
       clk_tick2 <= clk_tick; -- tick delayed by one clock cycle (for precise bus state sampling)
     end if;
   end process clock_generator;
+
+  -- enable SoC clock generator --
+  clkgen_en_o <= ctrl.enable;
 
   -- only use the lowest 4 clocks of the system clock generator --
   clk_src <= clkgen_i(3 downto 0);

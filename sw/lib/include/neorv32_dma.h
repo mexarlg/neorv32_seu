@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -14,8 +14,8 @@
 #ifndef NEORV32_DMA_H
 #define NEORV32_DMA_H
 
-#include <neorv32.h>
 #include <stdint.h>
+
 
 /**********************************************************************//**
  * @name IO Device: Direct Memory Access Controller (DMA)
@@ -38,11 +38,10 @@ enum NEORV32_DMA_CTRL_enum {
   DMA_CTRL_DFIFO_LSB = 16, /**< DMA control register(16) (r/-): log2(descriptor FIFO size), LSB */
   DMA_CTRL_DFIFO_MSB = 19, /**< DMA control register(19) (r/-): log2(descriptor FIFO size), MSB */
 
-  DMA_CTRL_ACK       = 26, /**< DMA control register(26) (-/w): Set to clear ERROR and DONE flags */
   DMA_CTRL_DEMPTY    = 27, /**< DMA control register(27) (r/-): Descriptor FIFO is empty */
   DMA_CTRL_DFULL     = 28, /**< DMA control register(28) (r/-): Descriptor FIFO is full */
-  DMA_CTRL_ERROR     = 29, /**< DMA control register(29) (r/-): Bus access error during transfer */
-  DMA_CTRL_DONE      = 30, /**< DMA control register(30) (r/-): A transfer has been executed when set */
+  DMA_CTRL_ERROR     = 29, /**< DMA control register(29) (r/c): Bus access error during transfer */
+  DMA_CTRL_DONE      = 30, /**< DMA control register(30) (r/c): A transfer has been executed when set */
   DMA_CTRL_BUSY      = 31  /**< DMA control register(32) (r/-): DMA busy / transfer in progress */
 };
 
@@ -106,9 +105,9 @@ int  neorv32_dma_descriptor_fifo_full(void);
 int  neorv32_dma_descriptor_fifo_empty(void);
 void neorv32_dma_enable(void);
 void neorv32_dma_disable(void);
-void neorv32_dma_irq_ack(void);
+void neorv32_dma_err_ack(void);
+void neorv32_dma_done_ack(void);
 int  neorv32_dma_program(uint32_t src_addr, uint32_t dst_addr, uint32_t config);
-void neorv32_dma_program_nocheck(uint32_t src_addr, uint32_t dst_addr, uint32_t config);
 void neorv32_dma_start(void);
 int  neorv32_dma_status(void);
 /**@}*/

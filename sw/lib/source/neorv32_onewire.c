@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2024 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -9,6 +9,10 @@
 /**
  * @file neorv32_onewire.c
  * @brief 1-Wire Interface Controller (ONEWIRE) HW driver source file.
+ *
+ * @note These functions should only be used if the ONEWIRE unit was synthesized (IO_ONEWIRE_EN = true).
+ *
+ * @see https://stnolting.github.io/neorv32/sw/files.html
  */
 
 #include <neorv32.h>
@@ -17,11 +21,16 @@
 /**********************************************************************//**
  * Check if ONEWIRE controller was synthesized.
  *
- * @return 0 if ONEWIRE was not synthesized, non-zero if ONEWIRE is available.
+ * @return 0 if ONEWIRE was not synthesized, 1 if ONEWIRE is available.
  **************************************************************************/
 int neorv32_onewire_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_ONEWIRE));
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_ONEWIRE)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -88,7 +97,7 @@ int neorv32_onewire_setup(uint32_t t_base) {
  **************************************************************************/
 void neorv32_onewire_enable(void) {
 
-  __MMREG32_BSET(NEORV32_ONEWIRE->CTRL, 1 << ONEWIRE_CTRL_EN);
+  NEORV32_ONEWIRE->CTRL |= (1 << ONEWIRE_CTRL_EN);
 }
 
 
@@ -97,7 +106,7 @@ void neorv32_onewire_enable(void) {
  **************************************************************************/
 void neorv32_onewire_disable(void) {
 
-  __MMREG32_BCLR(NEORV32_ONEWIRE->CTRL, 1 << ONEWIRE_CTRL_EN);
+  NEORV32_ONEWIRE->CTRL &= ~(1 << ONEWIRE_CTRL_EN);
 }
 
 
@@ -106,29 +115,40 @@ void neorv32_onewire_disable(void) {
  **************************************************************************/
 void neorv32_onewire_flush(void) {
 
-  __MMREG32_BSET(NEORV32_ONEWIRE->CTRL, 1 << ONEWIRE_CTRL_CLEAR);
+  NEORV32_ONEWIRE->CTRL &= ~(1 << ONEWIRE_CTRL_CLEAR);
 }
 
 
 /**********************************************************************//**
  * Get current bus state.
  *
- * @return Non-zero if bus is high, zero if bus is low.
+ * @return 1 if bus is high, 0 if bus is low.
  **************************************************************************/
 int neorv32_onewire_sense(void) {
 
-  return (int)(NEORV32_ONEWIRE->CTRL & (1 << ONEWIRE_CTRL_SENSE));
+  if (NEORV32_ONEWIRE->CTRL & (1 << ONEWIRE_CTRL_SENSE)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 /**********************************************************************//**
  * Check if ONEWIRE module is busy.
  *
- * @return Zero if not busy, non-zero if busy.
+ * @return 0 if not busy, 1 if busy.
  **************************************************************************/
 int neorv32_onewire_busy(void) {
 
-  return (int)(NEORV32_ONEWIRE->CTRL & (1 << ONEWIRE_CTRL_BUSY));
+  // check busy flag
+  if (NEORV32_ONEWIRE->CTRL & (1 << ONEWIRE_CTRL_BUSY)) {
+    return 1;
   }
+  else {
+    return 0;
+  }
+}
 
 
 // ----------------------------------------------------------------------------------------------------------------------------
@@ -153,11 +173,17 @@ void neorv32_onewire_reset(void) {
  *
  * @note This function is non-blocking.
  *
- * @return Zero if at lest one device is present, non-zero otherwise
+ * @return 0 if at lest one device is present, -1 otherwise
  **************************************************************************/
 int neorv32_onewire_reset_get_presence(void) {
 
-  return (int)(NEORV32_ONEWIRE->DCMD & (1 << ONEWIRE_DCMD_PRESENCE));
+  // check presence bit
+  if (NEORV32_ONEWIRE->DCMD & (1 << ONEWIRE_DCMD_PRESENCE)) {
+    return 0;
+  }
+  else {
+    return -1;
+  }
 }
 
 

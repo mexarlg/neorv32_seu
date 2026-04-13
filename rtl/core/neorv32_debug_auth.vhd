@@ -8,7 +8,7 @@
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
 -- Copyright (c) NEORV32 contributors.                                              --
--- Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  --
+-- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  --
 -- Licensed under the BSD-3-Clause license, see LICENSE for details.                --
 -- SPDX-License-Identifier: BSD-3-Clause                                            --
 -- ================================================================================ --
@@ -39,9 +39,14 @@ architecture neorv32_debug_auth_rtl of neorv32_debug_auth is
 
 begin
 
+  -- Warn about Default Authenticator -------------------------------------------------------
+  -- -------------------------------------------------------------------------------------------
+  assert false report "[NEORV32] using DEFAULT on-chip debugger authenticator. Replace by custom module." severity warning;
+
+
   -- Exemplary Authentication Mechanism -----------------------------------------------------
   -- -------------------------------------------------------------------------------------------
-  auth_ctrl: process(rstn_i, clk_i)
+  dm_controller: process(rstn_i, clk_i)
   begin
     if (rstn_i = '0') then
       authenticated_q <= '0';
@@ -49,10 +54,10 @@ begin
       if (enable_i = '0') then
         authenticated_q <= '0'; -- clear authentication when disabled
       elsif (we_i = '1') then
-        authenticated_q <= wdata_i(0); -- just write 1 to authenticate
+        authenticated_q <= wdata_i(0); -- just write a "1" to authenticate
       end if;
     end if;
-  end process auth_ctrl;
+  end process dm_controller;
 
   -- authenticator busy --
   busy_o <= '0'; -- this simple authenticator is always ready
@@ -63,7 +68,5 @@ begin
   -- read data --
   rdata_o <= (others => '0'); -- there is nothing to read here
 
-  -- warn about default authenticator --
-  assert false report "[NEORV32] Using DEFAULT on-chip debugger authenticator. Replace by custom module." severity warning;
 
 end neorv32_debug_auth_rtl;

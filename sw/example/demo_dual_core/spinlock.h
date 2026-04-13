@@ -8,6 +8,5 @@
 
 void spin_lock(void);
 void spin_unlock(void);
-int  spin_check(void);
 
 #endif // spinlock_h

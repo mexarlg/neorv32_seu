@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -17,11 +17,16 @@
 /**********************************************************************//**
  * Check if DMA controller was synthesized.
  *
- * @return 0 if DMA was not synthesized, non-zero if DMA is available.
+ * @return 0 if DMA was not synthesized, 1 if DMA is available.
  **************************************************************************/
 int neorv32_dma_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_DMA));
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_DMA)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -64,7 +69,7 @@ int neorv32_dma_descriptor_fifo_empty(void) {
  **************************************************************************/
 void neorv32_dma_enable(void) {
 
-  __MMREG32_BSET(NEORV32_DMA->CTRL, 1 << DMA_CTRL_EN);
+  NEORV32_DMA->CTRL |= (uint32_t)(1 << DMA_CTRL_EN);
 }
 
 
@@ -73,17 +78,25 @@ void neorv32_dma_enable(void) {
  **************************************************************************/
 void neorv32_dma_disable(void) {
 
-  __MMREG32_BCLR(NEORV32_DMA->CTRL, 1 << DMA_CTRL_EN);
+  NEORV32_DMA->CTRL &= ~((uint32_t)(1 << DMA_CTRL_EN));
 }
 
 
 /**********************************************************************//**
- * Manually clear pending DMA interrupt. This will also clear the
- * transfer-error and transfer-done status flags.
+ * Clear transfer-error status.
  **************************************************************************/
-void neorv32_dma_irq_ack(void) {
+void neorv32_dma_err_ack(void) {
 
-  __MMREG32_BSET(NEORV32_DMA->CTRL, 1 << DMA_CTRL_ACK);
+  NEORV32_DMA->CTRL |= (uint32_t)(1 << DMA_CTRL_ERROR);
+}
+
+
+/**********************************************************************//**
+ * Clear transfer-done status/interrupt.
+ **************************************************************************/
+void neorv32_dma_done_ack(void) {
+
+  NEORV32_DMA->CTRL |= (uint32_t)(1 << DMA_CTRL_DONE);
 }
 
 
@@ -100,30 +113,13 @@ void neorv32_dma_irq_ack(void) {
  **************************************************************************/
 int neorv32_dma_program(uint32_t src_addr, uint32_t dst_addr, uint32_t config) {
 
-  if (NEORV32_DMA->CTRL & (1 << DMA_CTRL_DFULL)) { return -3; } // three free entries too few
+  if (NEORV32_DMA->CTRL & (1 << DMA_CTRL_DFULL)) { return -3; }
   NEORV32_DMA->DESC = src_addr;
-  if (NEORV32_DMA->CTRL & (1 << DMA_CTRL_DFULL)) { return -2; } // two free entries too few
+  if (NEORV32_DMA->CTRL & (1 << DMA_CTRL_DFULL)) { return -2; }
   NEORV32_DMA->DESC = dst_addr;
-  if (NEORV32_DMA->CTRL & (1 << DMA_CTRL_DFULL)) { return -1; } // one free entry too few
-  NEORV32_DMA->DESC = config;
+  if (NEORV32_DMA->CTRL & (1 << DMA_CTRL_DFULL)) { return -1; }
+  NEORV32_DMA->DESC = config & 0xf8ffffffU;
   return 0;
-}
-
-
-/**********************************************************************//**
- * Program DMA descriptor (without checking FIFO level).
- *
- * @warning Descriptor FIFO might overflow. Use with care.
- *
- * @param[in] base_src Source data base address.
- * @param[in] base_dst Destination data base address.
- * @param[in] config Transfer type configuration (#NEORV32_DMA_CONF_enum).
- **************************************************************************/
-void neorv32_dma_program_nocheck(uint32_t src_addr, uint32_t dst_addr, uint32_t config) {
-
-  NEORV32_DMA->DESC = src_addr;
-  NEORV32_DMA->DESC = dst_addr;
-  NEORV32_DMA->DESC = config;
 }
 
 
@@ -132,7 +128,7 @@ void neorv32_dma_program_nocheck(uint32_t src_addr, uint32_t dst_addr, uint32_t 
  **************************************************************************/
 void neorv32_dma_start(void) {
 
-  __MMREG32_BSET(NEORV32_DMA->CTRL, 1 << DMA_CTRL_START);
+  NEORV32_DMA->CTRL |= 1 << DMA_CTRL_START;
 }
 
 

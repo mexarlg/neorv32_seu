@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2024 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -9,6 +9,10 @@
 /**
  * @file neorv32_twd.c
  * @brief Two-Wire Device Controller (TWD) HW driver source file.
+ *
+ * @note These functions should only be used if the TWD unit was synthesized (IO_TWD_EN = true).
+ *
+ * @see https://stnolting.github.io/neorv32/sw/files.html
  */
 
 #include <neorv32.h>
@@ -17,57 +21,44 @@
 /**********************************************************************//**
  * Check if TWD unit was synthesized.
  *
- * @return zero if TWD was not synthesized, non-zero if TWD is available.
+ * @return 0 if TWD was not synthesized, 1 if TWD is available.
  **************************************************************************/
 int neorv32_twd_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_TWD));
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_TWD)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
- * Enable and configure TWD controller.
- * The TWD control register bits are listed in #NEORV32_TWD_CTRL_enum.
+ * Enable and configure TWD controller. The TWD control register bits are listed in #NEORV32_TWD_CTRL_enum.
  *
  * @param[in] device_addr 7-bit device address.
  * @param[in] fsel Bus sample clock / filter select.
- * @param[in] irq_mask Interrupt configuration bit mask (TWD_CTRL_IRQ_* bits).
+ * @param[in] irq_rx_avail IRQ if RX FIFO data available.
+ * @param[in] irq_rx_full IRQ if RX FIFO full.
+ * @param[in] irq_tx_empty IRQ if TX FIFO empty.
+ * @param[in] tx_dummy_en enable sending tx_dummy (last sent byte) when fifo is empty
+ * @param[in] hide_read generate NACK ony READ-access when TX FIFO is empty
  **************************************************************************/
-void neorv32_twd_setup(int device_addr, int fsel, uint32_t irq_mask) {
+void neorv32_twd_setup(int device_addr, int fsel, int irq_rx_avail, int irq_rx_full, int irq_tx_empty, int tx_dummy_en, int hide_read) {
 
   NEORV32_TWD->CTRL = 0; // reset
 
-  neorv32_twd_irq_config(1, irq_mask);
-
-  uint32_t ctrl = NEORV32_TWD->CTRL;
+  uint32_t ctrl = 0;
   ctrl |= ((uint32_t)(               0x01) << TWD_CTRL_EN);
   ctrl |= ((uint32_t)(device_addr  & 0x7f) << TWD_CTRL_DEV_ADDR0);
   ctrl |= ((uint32_t)(fsel         & 0x01) << TWD_CTRL_FSEL);
+  ctrl |= ((uint32_t)(irq_rx_avail & 0x01) << TWD_CTRL_IRQ_RX_AVAIL);
+  ctrl |= ((uint32_t)(irq_rx_full  & 0x01) << TWD_CTRL_IRQ_RX_FULL);
+  ctrl |= ((uint32_t)(irq_tx_empty & 0x01) << TWD_CTRL_IRQ_TX_EMPTY);
+  ctrl |= ((uint32_t)(tx_dummy_en  & 0x01) << TWD_CTRL_TX_DUMMY_EN);
+  ctrl |= ((uint32_t)(hide_read    & 0x01) << TWD_CTRL_HIDE_READ);
   NEORV32_TWD->CTRL = ctrl;
-}
-
-
-/**********************************************************************//**
- * Enable/disable IRQ TWD source(s).
- *
- * @param[in] enable Enable IRQ source(s) when non-zero, disable when zero.
- * @param[in] irq_mask Interrupt configuration bit mask (TWD_CTRL_IRQ_* bits).
- **************************************************************************/
-void neorv32_twd_irq_config(int enable, uint32_t irq_mask) {
-
-  const uint32_t mask = (1 << TWD_CTRL_IRQ_RX_AVAIL) |
-                        (1 << TWD_CTRL_IRQ_RX_FULL)  |
-                        (1 << TWD_CTRL_IRQ_TX_EMPTY) |
-                        (1 << TWD_CTRL_IRQ_TX_NFULL) |
-                        (1 << TWD_CTRL_IRQ_COM_BEG)  |
-                        (1 << TWD_CTRL_IRQ_COM_END);
-
-  if (enable) {
-    __MMREG32_BSET(NEORV32_TWD->CTRL, irq_mask & mask);
-  }
-  else {
-    __MMREG32_BCLR(NEORV32_TWD->CTRL, irq_mask & mask);
-  }
 }
 
 
@@ -100,7 +91,7 @@ int neorv32_twd_get_tx_fifo_depth(void) {
  **************************************************************************/
 void neorv32_twd_disable(void) {
 
-  __MMREG32_BCLR(NEORV32_TWD->CTRL, 1 << TWD_CTRL_EN);
+  NEORV32_TWD->CTRL &= ~((uint32_t)(1 << TWD_CTRL_EN));
 }
 
 
@@ -109,7 +100,25 @@ void neorv32_twd_disable(void) {
  **************************************************************************/
 void neorv32_twd_enable(void) {
 
-  __MMREG32_BSET(NEORV32_TWD->CTRL, 1 << TWD_CTRL_EN);
+  NEORV32_TWD->CTRL |= (uint32_t)(1 << TWD_CTRL_EN);
+}
+
+
+/**********************************************************************//**
+ * Disable TWD tx_dummy byte.
+ **************************************************************************/
+void neorv32_twd_disable_tx_dummy(void) {
+
+  NEORV32_TWD->CTRL &= ~((uint32_t)(1 << TWD_CTRL_TX_DUMMY_EN));
+}
+
+
+/**********************************************************************//**
+ * Enable TWD tx_dummy byte.
+ **************************************************************************/
+void neorv32_twd_enable_tx_dummy(void) {
+
+  NEORV32_TWD->CTRL |= (uint32_t)(1 << TWD_CTRL_TX_DUMMY_EN);
 }
 
 
@@ -118,7 +127,7 @@ void neorv32_twd_enable(void) {
  **************************************************************************/
 void neorv32_twd_clear_rx(void) {
 
-  __MMREG32_BSET(NEORV32_TWD->CTRL, 1 << TWD_CTRL_CLR_RX);
+  NEORV32_TWD->CTRL |= (uint32_t)(1 << TWD_CTRL_CLR_RX);
 }
 
 
@@ -127,90 +136,119 @@ void neorv32_twd_clear_rx(void) {
  **************************************************************************/
 void neorv32_twd_clear_tx(void) {
 
-  __MMREG32_BSET(NEORV32_TWD->CTRL, 1 << TWD_CTRL_CLR_TX);
+  NEORV32_TWD->CTRL |= (uint32_t)(1 << TWD_CTRL_CLR_TX);
 }
 
 
 /**********************************************************************//**
- * Check if a TWD communication is active.
+ * Get current state of SCL bus line.
  *
- * @return zero if no communication, non-zero if active communication.
+ * @return 1 if SCL is high, 0 if SCL is low.
  **************************************************************************/
-int neorv32_twd_com_state(void) {
+int neorv32_twd_sense_scl(void) {
 
-  return (int)(NEORV32_TWD->CTRL & (1 << TWD_CTRL_COM));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_SENSE_SCL)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
- * Check if the TWD communication has started.
- * This function also clears the "communication started" flag it it was set.
+ * Get current state of SDA bus line.
  *
- * @return Non-zero if a communication-start has been observed, zero otherwise.
+ * @return 1 if SDA is high, 0 if SDA is low.
  **************************************************************************/
-int neorv32_twd_com_started(void) {
+int neorv32_twd_sense_sda(void) {
 
-  uint32_t ctrl_tmp = NEORV32_TWD->CTRL;
-  __MMREG32_BCLR(NEORV32_TWD->CTRL, 1 << TWD_CTRL_COM_END); // clear BEG if it is set, keep END
-  return (int)(ctrl_tmp & (1 << TWD_CTRL_COM_BEG));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_SENSE_SDA)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
- * Check if the TWD communication has ended.
- * This function also clears the "communication ended" flag it it was set.
+ * Check if there is a TWD bus operation in progress.
  *
- * @return Non-zero if a communication-end has been observed, zero otherwise.
+ * @return 0 if idle, 1 if busy.
  **************************************************************************/
-int neorv32_twd_com_ended(void) {
+int neorv32_twd_busy(void) {
 
-  uint32_t ctrl_tmp = NEORV32_TWD->CTRL;
-  __MMREG32_BCLR(NEORV32_TWD->CTRL, 1 << TWD_CTRL_COM_BEG); // clear END if it is set, keep BEG
-  return (int)(ctrl_tmp & (1 << TWD_CTRL_COM_END));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_BUSY)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Check if RX data available.
  *
- * @return zero if no data available, non-zero if data is available.
+ * @return 0 if no data available, 1 if data is available.
  **************************************************************************/
 int neorv32_twd_rx_available(void) {
 
-  return (int)(NEORV32_TWD->CTRL & (1 << TWD_CTRL_RX_AVAIL));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_RX_AVAIL)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Check if RX FIFO is full.
  *
- * @return zero if no RX FIFO is not full, non-zero if RX FIFO is full.
+ * @return 0 if no RX FIFO is not full, 1 if RX FIFO is full.
  **************************************************************************/
 int neorv32_twd_rx_full(void) {
 
-  return (int)(NEORV32_TWD->CTRL & (1 << TWD_CTRL_RX_FULL));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_RX_FULL)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Check if TX FIFO is empty.
  *
- * @return zero if no TX FIFO is not empty, non-zero if TX FIFO is empty.
+ * @return 0 if no TX FIFO is not empty, 1 if TX FIFO is empty.
  **************************************************************************/
 int neorv32_twd_tx_empty(void) {
 
-  return (int)(NEORV32_TWD->CTRL & (1 << TWD_CTRL_TX_EMPTY));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_TX_EMPTY)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Check if TX FIFO is full.
  *
- * @return zero if no TX FIFO is not full, non-zero if TX FIFO is full.
+ * @return 0 if no TX FIFO is not full, 1 if TX FIFO is full.
  **************************************************************************/
 int neorv32_twd_tx_full(void) {
 
-  return (int)(NEORV32_TWD->CTRL & (1 << TWD_CTRL_TX_FULL));
+  if (NEORV32_TWD->CTRL & (1 << TWD_CTRL_TX_FULL)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -237,4 +275,17 @@ void neorv32_twd_put(uint8_t data) {
 uint8_t neorv32_twd_get(void) {
 
   return NEORV32_TWD->DATA;
+}
+
+
+/**********************************************************************//**
+ * Clear TX Fifo and put data byte into TX FIFO to get stored into dummy.abs
+ * 
+ * @warning This function expects enabled dummy byte
+ *
+ * @param[in] data Data byte to be stored in TX FIFO/dummy.
+ **************************************************************************/
+void neorv32_twd_set_tx_dummy(uint8_t data) {
+  neorv32_twd_clear_tx();
+  neorv32_twd_put(data);
 }

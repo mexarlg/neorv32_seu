@@ -12,7 +12,6 @@
  * @note Sources:
  * https://www.sourceware.org/newlib/libc.html#Syscalls
  * https://interrupt.memfault.com/blog/boostrapping-libc-with-newlib
- * https://www.embecosm.com/appnotes/ean9/ean9-howto-newlib-1.0.pdf
  */
 
 #include <neorv32.h>
@@ -26,23 +25,6 @@
 #include <errno.h>
 #undef errno
 extern int errno;
-
-// global environment
-char *__env[1] = { 0 };
-char **environ = __env;
-
-
-/**********************************************************************//**
- * Issue a warning when semihosting is enabled.
- **************************************************************************/
-/**@{*/
-#ifdef STDIO_SEMIHOSTING
-  #warning Newlib/stdio.h semihosting enabled.
-#endif
-#ifdef TIME_SEMIHOSTING
-  #warning Newlib/time.h semihosting enabled.
-#endif
-/**@}*/
 
 
  /**********************************************************************//**
@@ -66,29 +48,11 @@ void _exit(int status) {
 
 
  /**********************************************************************//**
- * Open file handle.
- **************************************************************************/
-int _open(char *pathname, int flags) {
-#ifdef STDIO_SEMIHOSTING
-  return neorv32_semihosting_open(pathname, flags);
-#else
-  (void)pathname;
-  (void)flags;
-  return -1; // no files available
-#endif
-}
-
-
- /**********************************************************************//**
  * Close file handle.
  **************************************************************************/
 int _close(int file) {
-#ifdef STDIO_SEMIHOSTING
-  return neorv32_semihosting_close(file);
-#else
   (void)file;
   return -1; // no files available
-#endif
 }
 
 
@@ -103,15 +67,6 @@ int _fstat(int file, struct stat *st) {
 
 
  /**********************************************************************//**
- * Create new process.
- **************************************************************************/
-int _fork(void) {
-  errno = EAGAIN;
-  return -1;
-}
-
-
- /**********************************************************************//**
  * Process-ID; this is sometimes used to generate strings unlikely to
  * conflict with other processes.
  **************************************************************************/
@@ -122,14 +77,11 @@ int _getpid() {
 
  /**********************************************************************//**
  * Query whether output stream is a terminal.
+ * We only support terminal outputs here.
  **************************************************************************/
 int _isatty(int file) {
-#ifdef STDIO_SEMIHOSTING
-  return neorv32_semihosting_istty(file);
-#else
   (void)file;
-  return 1; // all streams are terminals
-#endif
+  return 1;
 }
 
 
@@ -145,58 +97,13 @@ int _kill(int pid, int sig) {
 
 
  /**********************************************************************//**
- * Rename existing file.
- **************************************************************************/
-int _link(char *old_name, char *new_name) {
-  (void)old_name;
-  (void)new_name;
-  errno = EMLINK;
-  return -1;
-}
-
-
- /**********************************************************************//**
  * Set position in a file.
  **************************************************************************/
 int _lseek(int file, int ptr, int dir) {
-#ifdef STDIO_SEMIHOSTING
-  return neorv32_semihosting_seek(file, ptr);
-#else
   (void)file;
   (void)ptr;
   (void)dir;
   return 0;
-#endif
-}
-
-
- /**********************************************************************//**
- * Status of a file.
- **************************************************************************/
-int _stat(char *file, struct stat *st) {
-  (void)file;
-  st->st_mode = S_IFCHR; // all files are character special devices
-  return 0;
-}
-
-
- /**********************************************************************//**
- * Wait for child process.
- **************************************************************************/
-int _wait(int status) {
-  (void)status;
-  errno = ECHILD;
-  return -1;
-}
-
-
- /**********************************************************************//**
- * Remove a file's directory entry.
- **************************************************************************/
-int _unlink(char *name) {
-  (void)name;
-  errno = ENOENT;
-  return -1;
 }
 
 
@@ -206,9 +113,6 @@ int _unlink(char *name) {
  **************************************************************************/
 int _read(int file, char *ptr, int len) {
 
-#ifdef STDIO_SEMIHOSTING
-  return neorv32_semihosting_read(file, ptr, len);
-#else
   char c = 0;
   int read_cnt = 0;
 
@@ -240,7 +144,6 @@ int _read(int file, char *ptr, int len) {
     errno = ENOSYS;
     return -1;
   }
-#endif
 }
 
 
@@ -250,9 +153,6 @@ int _read(int file, char *ptr, int len) {
  **************************************************************************/
 int _write(int file, char *ptr, int len) {
 
-#ifdef STDIO_SEMIHOSTING
-  return neorv32_semihosting_write(file, ptr, len);
-#else
   int write_cnt = 0;
 
   // write STDOUT and STDERR streams to NEORV32.UART0 (if available)
@@ -282,7 +182,6 @@ int _write(int file, char *ptr, int len) {
     errno = ENOSYS;
     return -1;
   }
-#endif
 }
 
 
@@ -328,11 +227,7 @@ void *_sbrk(int incr) {
  * Get Unix time. Used by "time", among others.
  **************************************************************************/
 int _gettimeofday(struct timeval *tv) {
-#ifdef TIME_SEMIHOSTING
-  tv->tv_sec  = (time_t)neorv32_semihosting_time();
-  tv->tv_usec = (suseconds_t)(tv->tv_sec * 1000000);
-  return 0;
-#else
+
   // use MTIME as system time (if available)
   if (neorv32_clint_available()) {
     tv->tv_sec  = (time_t)neorv32_clint_unixtime_get();
@@ -343,5 +238,4 @@ int _gettimeofday(struct timeval *tv) {
     errno = ENOSYS;
     return -1;
   }
-#endif
 }

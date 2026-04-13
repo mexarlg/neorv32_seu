@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -17,7 +17,7 @@
 /**********************************************************************//**
  * Simple delay function using busy-wait.
  *
- * @warning Timing is imprecise! Use CLINT.MTIME or CYCLE CSRs for precise timing.
+ * @warning Timing is imprecise! Use CLINT.MTIME or CSR.[M]CYCLE[H] for precise timing.
  *
  * @param[in] clock_hz CPU clock speed in Hz.
  * @param[in] time_ms Time in ms to wait (unsigned 32-bit).
@@ -208,7 +208,7 @@ uint64_t neorv32_aux_hexstr2uint64(char *buffer, unsigned int length) {
     }
 
     res <<= 4;
-    res += (uint64_t)d;
+    res |= (uint64_t)(d & 0xf);
   }
 
   return res;
@@ -299,12 +299,8 @@ void neorv32_aux_print_hw_config(void) {
 
   // general
   neorv32_uart0_printf("Is simulation:       ");
-  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_SIM)) {
-    neorv32_uart0_printf("yes\n");
-  }
-  else {
-    neorv32_uart0_printf("no\n");
-  }
+  if (neorv32_cpu_csr_read(CSR_MXISA) & (1 << CSR_MXISA_IS_SIM)) { neorv32_uart0_printf("yes\n"); }
+  else { neorv32_uart0_printf("no\n"); }
 
   neorv32_uart0_printf("CPU cores (harts):   %u\n", neorv32_sysinfo_get_numcores());
 
@@ -313,30 +309,30 @@ void neorv32_aux_print_hw_config(void) {
   neorv32_uart0_printf("On-chip debugger:    ");
   if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_OCD)) {
     neorv32_uart0_printf("enabled");
-    if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_OCD_AUTH)) {
-      neorv32_uart0_printf(" + authentication");
-    }
-    neorv32_uart0_printf(", %u HW trigger(s)\n", neorv32_cpu_hwtrig_get_number());
   }
   else {
-    neorv32_uart0_printf("disabled\n");
+    neorv32_uart0_printf("disabled");
+  }
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_OCD_AUTH)) {
+    neorv32_uart0_printf(" + authentication\n");
+  }
+  else {
+    neorv32_uart0_printf("\n");
   }
 
   // IDs
-  neorv32_uart0_printf(
-    "Hart ID:             0x%x\n"
-    "Vendor ID:           0x%x\n"
-    "Architecture ID:     0x%x\n"
-    "Implementation ID:   0x%x (v",
-    neorv32_cpu_csr_read(CSR_MHARTID),
-    neorv32_cpu_csr_read(CSR_MVENDORID),
-    neorv32_cpu_csr_read(CSR_MARCHID),
-    neorv32_cpu_csr_read(CSR_MIMPID)
-  );
+  neorv32_uart0_printf("Hart ID:             0x%x\n"
+                       "Architecture ID:     0x%x\n"
+                       "Implementation ID:   0x%x",
+                       neorv32_cpu_csr_read(CSR_MHARTID),
+                       neorv32_cpu_csr_read(CSR_MARCHID),
+                       neorv32_cpu_csr_read(CSR_MIMPID));
+  // hardware version
+  neorv32_uart0_printf(" (v");
   neorv32_aux_print_hw_version(neorv32_cpu_csr_read(CSR_MIMPID));
   neorv32_uart0_printf(")\n");
 
-  // CPU architecture and Endianness
+  // CPU architecture and endianness
   neorv32_uart0_printf("Architecture:        ");
   tmp = neorv32_cpu_csr_read(CSR_MISA);
   tmp = (tmp >> 30) & 0x03;
@@ -359,10 +355,11 @@ void neorv32_aux_print_hw_config(void) {
 
   // CPU sub-extensions
   tmp = neorv32_cpu_csr_read(CSR_MXISA);
+  if (tmp & (1<<CSR_MXISA_SDEXT))     { neorv32_uart0_printf("Sdext ");     }
+  if (tmp & (1<<CSR_MXISA_SDTRIG))    { neorv32_uart0_printf("Sdtrig ");    }
+  if (tmp & (1<<CSR_MXISA_SMPMP))     { neorv32_uart0_printf("Smpmp ");     }
   if (tmp & (1<<CSR_MXISA_ZAAMO))     { neorv32_uart0_printf("Zaamo ");     }
   if (tmp & (1<<CSR_MXISA_ZALRSC))    { neorv32_uart0_printf("Zalrsc ");    }
-  if (tmp & (1<<CSR_MXISA_ZCA))       { neorv32_uart0_printf("Zca ");       }
-  if (tmp & (1<<CSR_MXISA_ZCB))       { neorv32_uart0_printf("Zcb ");       }
   if (tmp & (1<<CSR_MXISA_ZBA))       { neorv32_uart0_printf("Zba ");       }
   if (tmp & (1<<CSR_MXISA_ZBB))       { neorv32_uart0_printf("Zbb ");       }
   if (tmp & (1<<CSR_MXISA_ZBKB))      { neorv32_uart0_printf("Zbkb ");      }
@@ -370,13 +367,11 @@ void neorv32_aux_print_hw_config(void) {
   if (tmp & (1<<CSR_MXISA_ZBKX))      { neorv32_uart0_printf("Zbkx ");      }
   if (tmp & (1<<CSR_MXISA_ZBS))       { neorv32_uart0_printf("Zbs ");       }
   if (tmp & (1<<CSR_MXISA_ZFINX))     { neorv32_uart0_printf("Zfinx ");     }
-  if (tmp & (1<<CSR_MXISA_ZIBI))      { neorv32_uart0_printf("Zibi ");      }
   if (tmp & (1<<CSR_MXISA_ZICNTR))    { neorv32_uart0_printf("Zicntr ");    }
   if (tmp & (1<<CSR_MXISA_ZICOND))    { neorv32_uart0_printf("Zicond ");    }
   if (tmp & (1<<CSR_MXISA_ZICSR))     { neorv32_uart0_printf("Zicsr ");     }
   if (tmp & (1<<CSR_MXISA_ZIFENCEI))  { neorv32_uart0_printf("Zifencei ");  }
   if (tmp & (1<<CSR_MXISA_ZIHPM))     { neorv32_uart0_printf("Zihpm ");     }
-  if (tmp & (1<<CSR_MXISA_ZIMOP))     { neorv32_uart0_printf("Zimop ");     }
   if (tmp & (1<<CSR_MXISA_ZKN))       { neorv32_uart0_printf("Zkn ");       }
   if (tmp & (1<<CSR_MXISA_ZKND))      { neorv32_uart0_printf("Zknd ");      }
   if (tmp & (1<<CSR_MXISA_ZKNE))      { neorv32_uart0_printf("Zkne ");      }
@@ -386,11 +381,12 @@ void neorv32_aux_print_hw_config(void) {
   if (tmp & (1<<CSR_MXISA_ZKSH))      { neorv32_uart0_printf("Zksh ");      }
   if (tmp & (1<<CSR_MXISA_ZKT))       { neorv32_uart0_printf("Zkt ");       }
   if (tmp & (1<<CSR_MXISA_ZMMUL))     { neorv32_uart0_printf("Zmmul ");     }
-  if (tmp & (1<<CSR_MXISA_SDEXT))     { neorv32_uart0_printf("Sdext ");     }
-  if (tmp & (1<<CSR_MXISA_SDTRIG))    { neorv32_uart0_printf("Sdtrig ");    }
-  if (tmp & (1<<CSR_MXISA_SMCNTRPMF)) { neorv32_uart0_printf("Smcntrpmf "); }
-  if (tmp & (1<<CSR_MXISA_SMPMP))     { neorv32_uart0_printf("Smpmp ");     }
-  if (tmp & (1<<CSR_MXISA_XCFU))      { neorv32_uart0_printf("Xcfu ");      }
+  if (tmp & (1<<CSR_MXISA_ZXCFU))     { neorv32_uart0_printf("Zxcfu ");     }
+  // CPU tuning options
+  neorv32_uart0_printf("\nTuning options:      ");
+  if (tmp & (1<<CSR_MXISA_FASTMUL))   { neorv32_uart0_printf("fast_mul ");   }
+  if (tmp & (1<<CSR_MXISA_FASTSHIFT)) { neorv32_uart0_printf("fast_shift "); }
+  if (tmp & (1<<CSR_MXISA_RFHWRST))   { neorv32_uart0_printf("rf_hw_rst ");  }
 
   // check physical memory protection
   neorv32_uart0_printf("\nPhys. Memory Prot.:  ");
@@ -467,17 +463,10 @@ void neorv32_aux_print_hw_config(void) {
     uint32_t ic_num_blocks = (NEORV32_SYSINFO->CACHE >> SYSINFO_CACHE_INST_NUM_BLOCKS_0) & 0x0F;
     ic_num_blocks = 1 << ic_num_blocks;
 
-    neorv32_uart0_printf("%u bytes (%ux%u)", ic_num_blocks*ic_block_size, ic_num_blocks, ic_block_size);
-
-    if (NEORV32_SYSINFO->CACHE & (1 << SYSINFO_CACHE_INST_BURSTS_EN)) {
-      neorv32_uart0_printf(", bursts enabled\n");
-    }
-    else {
-      neorv32_uart0_printf(", no bursts\n");
-    }
+    neorv32_uart0_printf("%u bytes (%ux%u)\n", ic_num_blocks*ic_block_size, ic_num_blocks, ic_block_size);
   }
   else {
-    neorv32_uart0_printf("none");
+    neorv32_uart0_printf("none\n");
   }
 
   // CPU d-cache
@@ -490,38 +479,21 @@ void neorv32_aux_print_hw_config(void) {
     uint32_t dc_num_blocks = (NEORV32_SYSINFO->CACHE >> SYSINFO_CACHE_DATA_NUM_BLOCKS_0) & 0x0F;
     dc_num_blocks = 1 << dc_num_blocks;
 
-    neorv32_uart0_printf("%u bytes (%ux%u)", dc_num_blocks*dc_block_size, dc_num_blocks, dc_block_size);
-
-    if (NEORV32_SYSINFO->CACHE & (1 << SYSINFO_CACHE_DATA_BURSTS_EN)) {
-      neorv32_uart0_printf(", bursts enabled\n");
-    }
-    else {
-      neorv32_uart0_printf(", no bursts\n");
-    }
+    neorv32_uart0_printf("%u bytes (%ux%u)\n", dc_num_blocks*dc_block_size, dc_num_blocks, dc_block_size);
   }
   else {
-    neorv32_uart0_printf("none");
+    neorv32_uart0_printf("none\n");
   }
 
   // external bus interface
   neorv32_uart0_printf("Ext. bus interface:  ");
   tmp = NEORV32_SYSINFO->SOC;
   if (tmp & (1 << SYSINFO_SOC_XBUS)) {
-    neorv32_uart0_printf("enabled");
+    neorv32_uart0_printf("enabled\n");
   }
   else {
-    neorv32_uart0_printf("none");
+    neorv32_uart0_printf("none\n");
   }
-  if (NEORV32_SYSINFO->CACHE & ((1 << SYSINFO_CACHE_INST_BURSTS_EN) | (1 << SYSINFO_CACHE_DATA_BURSTS_EN))) {
-    neorv32_uart0_printf(", bursts enabled\n");
-  }
-  else {
-    neorv32_uart0_printf("\n");
-  }
-
-  // bus timeouts
-  neorv32_uart0_printf("Bus timeout (int):   %u cycles\n", neorv32_sysinfo_get_extbustimeout());
-  neorv32_uart0_printf("Bus timeout (ext):   %u cycles\n", neorv32_sysinfo_get_extbustimeout());
 
   // peripherals
   neorv32_uart0_printf("Peripherals:         ");
@@ -538,7 +510,6 @@ void neorv32_aux_print_hw_config(void) {
   if (tmp & (1 << SYSINFO_SOC_IO_SLINK))   { neorv32_uart0_printf("SLINK ");      }
   if (tmp & (1 << SYSINFO_SOC_IO_SPI))     { neorv32_uart0_printf("SPI ");        }
                                              neorv32_uart0_printf("SYSINFO "); // always enabled
-  if (tmp & (1 << SYSINFO_SOC_IO_TRACER))  { neorv32_uart0_printf("TRACER ");     }
   if (tmp & (1 << SYSINFO_SOC_IO_TRNG))    { neorv32_uart0_printf("TRNG ");       }
   if (tmp & (1 << SYSINFO_SOC_IO_TWD))     { neorv32_uart0_printf("TWD ");        }
   if (tmp & (1 << SYSINFO_SOC_IO_TWI))     { neorv32_uart0_printf("TWI ");        }
@@ -593,7 +564,7 @@ void neorv32_aux_print_about(void) {
   if (neorv32_uart0_available() != 0) { // cannot output anything if UART0 is not implemented
     neorv32_uart0_puts("The NEORV32 RISC-V Processor, github.com/stnolting/neorv32\n"
                        "Copyright (c) NEORV32 contributors.\n"
-                       "Copyright (c) 2020 - 2026, Stephan Nolting. All rights reserved.\n"
+                       "Copyright (c) 2020 - 2025, Stephan Nolting. All rights reserved.\n"
                        "SPDX-License-Identifier: BSD-3-Clause\n");
   }
 }
@@ -651,7 +622,7 @@ void neorv32_aux_print_license(void) {
       "BSD 3-Clause License\n"
       "\n"
       "Copyright (c) NEORV32 contributors.\n"
-      "Copyright (c) 2020 - 2026, Stephan Nolting. All rights reserved.\n"
+      "Copyright (c) 2020 - 2025, Stephan Nolting. All rights reserved.\n"
       "\n"
       "Redistribution and use in source and binary forms, with or without modification, are\n"
       "permitted provided that the following conditions are met:\n"

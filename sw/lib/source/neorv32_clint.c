@@ -8,7 +8,7 @@
 
 /**
  * @file neorv32_clint.c
- * @brief Core-Local Interruptor (CLINT) HW driver source file.
+ * @brief Hardware Local Interruptor (CLINT) HW driver source file.
  */
 
 #include <neorv32.h>
@@ -17,11 +17,16 @@
 /**********************************************************************//**
  * Check if CLINT module was synthesized.
  *
- * @return 0 if CLINT was not synthesized, non-zero if CLINT is available.
+ * @return 0 if CLINT was not synthesized, 1 if CLINT is available.
  **************************************************************************/
 int neorv32_clint_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_CLINT));
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_CLINT)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 

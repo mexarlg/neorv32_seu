@@ -1,7 +1,7 @@
 // ================================================================================ //
 // The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              //
 // Copyright (c) NEORV32 contributors.                                              //
-// Copyright (c) 2020 - 2026 Stephan Nolting. All rights reserved.                  //
+// Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  //
 // Licensed under the BSD-3-Clause license, see LICENSE for details.                //
 // SPDX-License-Identifier: BSD-3-Clause                                            //
 // ================================================================================ //
@@ -17,11 +17,16 @@
 /**********************************************************************//**
  * Check if SPI unit was synthesized.
  *
- * @return 0 if SPI was not synthesized, non-zero if SPI is available.
+ * @return 0 if SPI was not synthesized, 1 if SPI is available.
  **************************************************************************/
 int neorv32_spi_available(void) {
 
-  return (int)(NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_SPI));
+  if (NEORV32_SYSINFO->SOC & (1 << SYSINFO_SOC_IO_SPI)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
@@ -32,8 +37,9 @@ int neorv32_spi_available(void) {
  * @prama[in] cdiv Clock divider (0..15).
  * @param[in] clk_phase Clock phase (0=sample on rising edge, 1=sample on falling edge).
  * @param[in] clk_polarity Clock polarity (when idle).
+ * @param[in] irq_mask Interrupt configuration bit mask (CTRL's irq_* bits).
  **************************************************************************/
-void neorv32_spi_setup(int prsc, int cdiv, int clk_phase, int clk_polarity) {
+void neorv32_spi_setup(int prsc, int cdiv, int clk_phase, int clk_polarity, uint32_t irq_mask) {
 
   NEORV32_SPI->CTRL = 0; // reset
 
@@ -43,8 +49,27 @@ void neorv32_spi_setup(int prsc, int cdiv, int clk_phase, int clk_polarity) {
   tmp |= (uint32_t)(clk_polarity & 0x01) << SPI_CTRL_CPOL;
   tmp |= (uint32_t)(prsc         & 0x07) << SPI_CTRL_PRSC0;
   tmp |= (uint32_t)(cdiv         & 0x0f) << SPI_CTRL_CDIV0;
+  tmp |= (uint32_t)(irq_mask     & (0x0f << SPI_CTRL_IRQ_RX_AVAIL));
 
   NEORV32_SPI->CTRL = tmp;
+}
+
+
+/**********************************************************************//**
+ * Enable high-speed mode.
+ **************************************************************************/
+void neorv32_spi_highspeed_enable(void) {
+
+  NEORV32_SPI->CTRL |= ((uint32_t)(1 << SPI_CTRL_HIGHSPEED));
+}
+
+
+/**********************************************************************//**
+ * Disable high-speed mode.
+ **************************************************************************/
+void neorv32_spi_highspeed_disable(void) {
+
+  NEORV32_SPI->CTRL &= ~((uint32_t)(1 << SPI_CTRL_HIGHSPEED));
 }
 
 
@@ -61,7 +86,15 @@ uint32_t neorv32_spi_get_clock_speed(void) {
   uint32_t prsc_sel  = (ctrl >> SPI_CTRL_PRSC0) & 0x7;
   uint32_t clock_div = (ctrl >> SPI_CTRL_CDIV0) & 0xf;
 
-  uint32_t tmp = 2 * PRSC_LUT[prsc_sel] * (1 + clock_div);
+  uint32_t tmp = 0;
+
+  if (ctrl & (1 << SPI_CTRL_HIGHSPEED)) { // high-speed mode enabled?
+    tmp = 2 * 1 * (1 + clock_div);
+  }
+  else {
+    tmp = 2 * PRSC_LUT[prsc_sel] * (1 + clock_div);
+  }
+
   return neorv32_sysinfo_get_clk() / tmp;
 }
 
@@ -71,7 +104,7 @@ uint32_t neorv32_spi_get_clock_speed(void) {
  **************************************************************************/
 void neorv32_spi_disable(void) {
 
-  __MMREG32_BCLR(NEORV32_SPI->CTRL, 1 << SPI_CTRL_EN);
+  NEORV32_SPI->CTRL &= ~((uint32_t)(1 << SPI_CTRL_EN));
 }
 
 
@@ -80,7 +113,7 @@ void neorv32_spi_disable(void) {
  **************************************************************************/
 void neorv32_spi_enable(void) {
 
-  __MMREG32_BSET(NEORV32_SPI->CTRL, 1 << SPI_CTRL_EN);
+  NEORV32_SPI->CTRL |= ((uint32_t)(1 << SPI_CTRL_EN));
 }
 
 
@@ -189,53 +222,30 @@ void neorv32_spi_cs_dis_nonblocking(void) {
 /**********************************************************************//**
  * Check if any chip-select line is active.
  *
- * @return Zero if no CS lines are active, non-zero if a CS line is active.
+ * @return 0 if no CS lines are active, 1 if at least one CS line is active.
  **************************************************************************/
 int neorv32_spi_check_cs(void) {
 
-  return (int)(NEORV32_SPI->CTRL & (1 << SPI_CS_ACTIVE));
-}
-
-
-/**********************************************************************//**
- * Check if RX FIFO data is available.
- *
- * @return Zero if no data available, non-zero if RX FIFO data is available.
- **************************************************************************/
-int neorv32_spi_rx_avail(void) {
-
-  return (int)(NEORV32_SPI->CTRL & (1 << SPI_CTRL_RX_AVAIL));
-}
-
-
-/**********************************************************************//**
- * Check if TX FIFO is empty.
- *
- * @return Zero if RX FIFO is not empty, non-zero if RX FIFO is empty.
- **************************************************************************/
-int neorv32_spi_tx_empty(void) {
-
-  return (int)(NEORV32_SPI->CTRL & (1 << SPI_CTRL_TX_EMPTY));
-}
-
-
-/**********************************************************************//**
- * Check if TX FIFO is full.
- *
- * @return Zero if TX FIFO is not full, non-zero if TX FIFO is full.
- **************************************************************************/
-int neorv32_spi_tx_full(void) {
-
-  return (int)(NEORV32_SPI->CTRL & (1 << SPI_CTRL_TX_FULL));
+  if (NEORV32_SPI->CTRL & (1<<SPI_CS_ACTIVE)) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
 
 
 /**********************************************************************//**
  * Check if SPI transceiver is busy or TX FIFO not empty.
  *
- * @return 0 if idle, non-zero if busy
+ * @return 0 if idle, 1 if busy
  **************************************************************************/
 int neorv32_spi_busy(void) {
 
-  return (int)(NEORV32_SPI->CTRL & (1 << SPI_CTRL_BUSY));
+  if ((NEORV32_SPI->CTRL & (1<<SPI_CTRL_BUSY)) != 0) {
+    return 1;
+  }
+  else {
+    return 0;
+  }
 }
