@@ -234,13 +234,11 @@ Press it any time to restart the bootloader.
 
 ### Step 1 — Create the Vivado Project
 
-Open Vivado and in the TCL console run:
+Open Vivado and run TCL script:
 
 ```tcl
-source C:/path/to/neorv32_seu/scripts/run_neorv32.tcl
+neorv32_seu/scripts/run_neorv32.tcl
 ```
-
-> Use forward slashes `/` even on Windows inside the Vivado TCL console.
 
 ### Step 2 — Synthesise, Implement and Generate Bitstream
 
@@ -259,6 +257,7 @@ In the Flow Navigator:
 ### Step 4 — Verify the Bootloader
 
 Attach the PmodUSBUART to WSL2 (once per session in PowerShell as Administrator):
+(Check id of usb port so it corresponds to the single uart (6001), in my case its id 4-3)
 
 ```powershell
 usbipd attach --wsl --busid 4-3
@@ -288,11 +287,11 @@ Use the provided script from the project root:
 
 ```bash
 # First time only — make executable
-chmod +x scripts/neorv32_run.sh
+chmod +x neorv32_run.sh
 
 # Compile, upload and open serial monitor automatically
-./scripts/neorv32_run.sh hello_world
-./scripts/neorv32_run.sh demo_blink_led
+./neorv32_run.sh hello_world
+./neorv32_run.sh demo_blink_led
 ```
 
 Expected output for hello world:
@@ -322,7 +321,7 @@ neorv32_cpu_delay_ms(500);                       // wait 500ms
 Then run it:
 
 ```bash
-./scripts/neorv32_run.sh my_program
+./neorv32_run.sh my_program
 ```
 
 ---
