@@ -170,7 +170,7 @@ neorv32_seu/
 │   ├── run_neorv32.tcl                   ← Creates the Vivado project automatically
 │   ├── build_neorv32_bitstream.tcl       ← Creates the bitstream and runs reports
 │   ├── neorv32_debug_session.py          ← Template module for debugging and testing using openOCD
-compile_neorv32.sh     ← Compiles and uploads programs to the board (once FPGA programmed and neorv32 restarted)
+compile_neorv32.sh     ← Compiles and uploads programs to cpu (FPGA programmed, neorv32 restarted)
 ├── sw/                ← NEORV32 v1.11.6 software framework
 │   ├── example/       ← Example C programs
 │   └── lib/           ← NEORV32 HAL (hardware drivers)
@@ -192,7 +192,7 @@ compile_neorv32.sh     ← Compiles and uploads programs to the board (once FPGA
 
 ### 5.1 Power and Programming
 
-Connect the **USB Micro-B cable** to the **PROG/UART port (J13)** on the Zybo.
+Connect the **USB Micro-B cable** to the **PROG/UART port (J12)** on the Zybo.
 This powers the board and lets Vivado program the FPGA. Flip the power switch ON.
 The green DONE LED only lights up after the FPGA is programmed.
 
@@ -255,6 +255,7 @@ neorv32_seu/scripts/build_neorv32_bitstream.tcl
 ### Step 4 — Verify the Bootloader
 
 Attach the PmodUSBUART port to WSL2 (ONCE PER SESSION in PowerShell as Administrator):
+
 (Check id of usb port so it corresponds to the single uart (6001), in my case its id 4-3)
 
 ```powershell
@@ -295,7 +296,7 @@ Use the provided script from the project root:
 # If this is the first time: — make executable
 chmod +x compile_neorv32.sh
 
-# Compile, upload and open serial monitor a program example (more details inside file)
+# Compile, upload a program example (more details inside compile_neorv32 file)
 ./compile_neorv32.sh hello_world
 # Every time a different program is run, the neorv32 should be rst (btn0)!
 ./compile_neorv32.sh demo_blink_led
@@ -309,7 +310,7 @@ Hello world! :)
 
 ### Step 6 — Write Your Own Program
 
-Copy an example and edit `main.c`:
+Copy an example, create its foulder inside sw/example and edit the `main.c`:
 
 ```c
 #include <neorv32.h>
