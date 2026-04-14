@@ -26,8 +26,8 @@ Mitigation techniques under investigation:
 
 | Tool | Purpose |
 |---|---|
-| Xilinx Vivado 2025.2 (free WebPACK) | Synthesise RTL and program the FPGA |
-| ModelSim 2020.1 (free) | Simulate and verify RTL modules |
+| Xilinx Vivado 2025.2 | Synthesise RTL and program the FPGA |
+| ModelSim 2020.1 | Simulate and verify RTL modules |
 | `riscv32-unknown-elf-gcc 13.2.0` | Compile C programs for the NEORV32 |
 | Make | Runs the NEORV32 build system |
 | minicom | Serial terminal to see UART output |
@@ -98,7 +98,7 @@ riscv32-unknown-elf-gcc --version
 sudo usermod -aG dialout $USER
 ```
 
-### 3.6 USB Forwarding to WSL2 (Windows only)
+### 3.6 USB Forwarding to WSL2 (Need USB (uart) cable connected!)
 
 Install usbipd in **PowerShell as Administrator**:
 
@@ -106,26 +106,18 @@ Install usbipd in **PowerShell as Administrator**:
 winget install usbipd
 ```
 
-Every session, with USB cables connected, run:
+Now lets make sure you find the uart port:
 
 ```powershell
 # List devices to find the BUSID of your PmodUSBUART
 usbipd list
 # Expected entry: 0403:6001  USB Serial Converter
 
-# Bind once (first time only per device)
+# Bind once (first time only per device, use the (4-3) id of 6001 - uart)
 usbipd bind --busid 4-3
-
-# Attach to WSL2 every session
-usbipd attach --wsl --busid 4-3
 ```
 
-Verify in WSL2:
-
-```bash
-ls /dev/ttyUSB*
-# Expected: /dev/ttyUSB0
-```
+Every time in a new session, the usb port should be passed to WSL. But for now this is enough!
 
 ### 3.7 OpenOCD and GDB (optional — for JTAG debugging only)
 
@@ -175,8 +167,10 @@ neorv32_seu/
 ├── constraints/
 │   └── zybo_z7_neorv32.xdc   ← Zybo Z7-20 pin assignments
 ├── scripts/
-│   ├── run_neorv32.tcl       ← Creates the Vivado project automatically
-│   └── neorv32_run.sh        ← Compiles and uploads programs to the board
+│   ├── run_neorv32.tcl                   ← Creates the Vivado project automatically
+│   ├── build_neorv32_bitstream.tcl       ← Creates the bitstream and runs reports
+│   ├── neorv32_debug_session.py          ← Template module for debugging and testing using openOCD
+compile_neorv32.sh     ← Compiles and uploads programs to the board (once FPGA programmed and neorv32 restarted)
 ├── sw/                ← NEORV32 v1.11.6 software framework
 │   ├── example/       ← Example C programs
 │   └── lib/           ← NEORV32 HAL (hardware drivers)
@@ -194,7 +188,7 @@ neorv32_seu/
 
 ---
 
-## 5. Physical Connections
+## 5. LETS START PLAYING! - Physical Connections
 
 ### 5.1 Power and Programming
 
@@ -204,29 +198,27 @@ The green DONE LED only lights up after the FPGA is programmed.
 
 ### 5.2 UART — PmodUSBUART on Pmod JB
 
-Plug the PmodUSBUART directly into **Pmod JB** (right side of board, second connector from top).
-Align pin 1 of the module with pin 1 of the connector (marked with a small triangle on the PCB).
-Connect the module's micro-USB cable to your PC.
+> Set jumper **JP1 connecting LCL and VCC** on the PmodUSBUART (blue cap) since the Zybo is already powered by the programming cable.
 
-> Set jumper **JP1 to LCL** on the PmodUSBUART since the Zybo is already powered by the programming cable.
+Plug the PmodUSBUART directly into **Pmod JB** (top row of JB, with blue jumper cap of converter board up).
+This is aligning pin 1 of the pmod with pin 1 of the pcb (marked with a "1" on pcb, and a "square" on the pmod).
+Connect the module's micro-USB cable to your PC.
 
 ### 5.3 JTAG — JTAG-HS2 on Pmod JD (optional)
 
 Connect the JTAG-HS2 individual pins to **Pmod JD** using jumper wires:
 
 ```
-HS2 Pin 1 (TCK) → Pmod JD Pin 1 (T14)
-HS2 Pin 2 (GND) → Pmod JD Pin 5 (GND)
-HS2 Pin 3 (TDO) → Pmod JD Pin 3 (P14)
-HS2 Pin 4 (TDI) → Pmod JD Pin 2 (T15)
-HS2 Pin 5 (VDD) → Pmod JD Pin 6 (3V3)
-HS2 Pin 6 (TMS) → Pmod JD Pin 4 (R14)
+jtag_tck_i   → Pmod JD pin 1                 (T14)
+jtag_tdi_i   → Pmod JD pin 2                 (T15)
+jtag_tdo_o   → Pmod JD pin 3                 (P14)
+jtag_tms_i   → Pmod JD pin 4                 (R14)
 ```
 
 ### 5.4 Reset Button
 
 **BTN0** (leftmost button on the board) resets the NEORV32 CPU.
-Press it any time to restart the bootloader.
+Press it any time to restart the NEORV32 bootloader.
 
 ---
 
@@ -247,6 +239,12 @@ In the Flow Navigator:
 2. **Run Implementation** — confirm **WNS ≥ 0** in the timing report
 3. **Generate Bitstream**
 
+Or run the following tcl script to generate reports and the bitstream:
+
+```tcl
+neorv32_seu/scripts/build_neorv32_bitstream.tcl
+```
+
 ### Step 3 — Program the FPGA
 
 1. **Open Hardware Manager → Open Target → Auto Connect**
@@ -256,11 +254,17 @@ In the Flow Navigator:
 
 ### Step 4 — Verify the Bootloader
 
-Attach the PmodUSBUART to WSL2 (once per session in PowerShell as Administrator):
+Attach the PmodUSBUART port to WSL2 (ONCE PER SESSION in PowerShell as Administrator):
 (Check id of usb port so it corresponds to the single uart (6001), in my case its id 4-3)
 
 ```powershell
 usbipd attach --wsl --busid 4-3
+```
+Verify in WSL2:
+
+```bash
+ls /dev/ttyUSB*
+# Expected: /dev/ttyUSB0
 ```
 
 Then open a serial terminal in WSL2:
@@ -269,7 +273,7 @@ Then open a serial terminal in WSL2:
 minicom -D /dev/ttyUSB0 -b 19200
 ```
 
-Press **BTN0**. You should see:
+Press **BTN0** to restart NEORV32. You should see:
 
 ```
 << NEORV32 Bootloader >>
@@ -279,19 +283,22 @@ CLK:  0x07735940        ← 125 MHz
 Auto-boot in 10s. Press any key to abort.
 ```
 
-`HWV: 0x01110600` confirms the correct version. Exit minicom with `Ctrl+A` then `X`.
+`HWV: 0x01110600` confirms the correct version. Exit minicom with `Ctrl+A` then `X` and `Enter`.
+
+The FPGA is set. The neorv32 is set. And the uart communication between both is set. Now lets run a program!
 
 ### Step 5 — Compile and Upload a Program
 
 Use the provided script from the project root:
 
 ```bash
-# First time only — make executable
-chmod +x neorv32_run.sh
+# If this is the first time: — make executable
+chmod +x compile_neorv32.sh
 
-# Compile, upload and open serial monitor automatically
-./neorv32_run.sh hello_world
-./neorv32_run.sh demo_blink_led
+# Compile, upload and open serial monitor a program example (more details inside file)
+./compile_neorv32.sh hello_world
+# Every time a different program is run, the neorv32 should be rst (btn0)!
+./compile_neorv32.sh demo_blink_led
 ```
 
 Expected output for hello world:
@@ -303,12 +310,6 @@ Hello world! :)
 ### Step 6 — Write Your Own Program
 
 Copy an example and edit `main.c`:
-
-```bash
-cp -r sw/example/hello_world sw/example/my_program
-```
-
-Useful HAL functions:
 
 ```c
 #include <neorv32.h>
