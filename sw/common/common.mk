@@ -33,10 +33,10 @@ BUILD_DIR ?= build
 EFFORT ?= -Os
 
 # Compiler toolchain prefix
-RISCV_PREFIX ?= riscv-none-elf-
+RISCV_PREFIX ?= riscv32-unknown-elf-
 
 # CPU architecture and ABI
-MARCH ?= rv32i_zicsr_zifencei
+MARCH ?= rv32imc_zicsr_zicntr_zifencei
 MABI  ?= ilp32
 
 # User flags for additional configuration (will be added to compiler flags)

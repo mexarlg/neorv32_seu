@@ -22,8 +22,8 @@ ENTRY(_start)
 __neorv32_heap_size = DEFINED(__neorv32_heap_size) ? __neorv32_heap_size : 0;
 
 /* Default rom/ram (IMEM/DMEM) sizes */
-__neorv32_rom_size = DEFINED(__neorv32_rom_size) ? __neorv32_rom_size : 16k;
-__neorv32_ram_size = DEFINED(__neorv32_ram_size) ? __neorv32_ram_size : 8K;
+__neorv32_rom_size = DEFINED(__neorv32_rom_size) ? __neorv32_rom_size : 32k;
+__neorv32_ram_size = DEFINED(__neorv32_ram_size) ? __neorv32_ram_size : 32K;
 
 /* Default rom/ram (IMEM/DMEM) base addresses */
 __neorv32_rom_base = DEFINED(__neorv32_rom_base) ? __neorv32_rom_base : 0x00000000;
