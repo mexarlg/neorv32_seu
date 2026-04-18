@@ -1,11 +1,7 @@
 # Application makefile.
-# Use this makefile to configure all relevant CPU / compiler options.
 
-# Override the default CPU ISA
+# Override the default CPU ISA — must match VHDL generics exactly
 MARCH = rv32imc_zicsr_zifencei
-
-# Override the default RISC-V GCC prefix
-#RISCV_PREFIX ?= riscv-none-elf-
 
 # Override default optimization goal
 EFFORT = -O3
@@ -18,13 +14,10 @@ USER_FLAGS += \
 -Wl,--defsym,__neorv32_rom_size=64k \
 -Wl,--defsym,__neorv32_rom_base=0x00000000
 
-# Adjust processor DMEM size
+# Adjust processor DMEM size — must match DMEM_SIZE generic in VHDL
 USER_FLAGS += \
--Wl,--defsym,__neorv32_ram_size=16k \
+-Wl,--defsym,__neorv32_ram_size=32k \
 -Wl,--defsym,__neorv32_ram_base=0x80000000
-
-# Adjust maximum heap size
-##USER_FLAGS += -Wl,--defsym,__neorv32_heap_size=8k
 
 # Additional sources
 APP_SRC += $(wildcard source/*.c)

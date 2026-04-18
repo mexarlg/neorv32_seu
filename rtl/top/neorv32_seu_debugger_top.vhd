@@ -19,7 +19,7 @@ entity neorv32_seu_debugger_top is
     generic (
         -- Change these for your setup --
         CLOCK_FREQUENCY : natural := 125000000; -- clock frequency of clk_i in Hz
-        IMEM_SIZE       : natural := 32 * 1024; -- size of processor-internal instruction memory in bytes (n*kB)
+        IMEM_SIZE       : natural := 64 * 1024; -- size of processor-internal instruction memory in bytes (n*kB)
         DMEM_SIZE       : natural := 32 * 1024  -- size of processor-internal data memory in bytes (n*kB)
     );
     port (
