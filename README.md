@@ -67,7 +67,11 @@ Inside a Linux or WSL2 terminal:
 # Install Make and minicom
 sudo apt update
 sudo apt install make minicom -y
+```
 
+#### Option A — Prebuilt toolchain (recommended)
+
+```bash
 # Download the NEORV32 prebuilt GCC toolchain
 # Go to: https://github.com/stnolting/riscv-gcc-prebuilt/releases
 # Download: riscv32-unknown-elf.gcc-13.2.0.tar.gz
@@ -84,12 +88,31 @@ riscv32-unknown-elf-gcc --version
 # Expected: riscv32-unknown-elf-gcc 13.2.0
 ```
 
-> **Important:** the toolchain must be configured for `rv32i`. Verify with:
+> **Important — verify the architecture is rv32i not rv32e:**
 > ```bash
 > riscv32-unknown-elf-gcc -Q --help=target | grep march
 > # Must show: rv32i (NOT rv32e)
 > ```
-> If it shows `rv32e` the toolchain is wrong — download the correct one from the link above.
+> If it shows `rv32e` the toolchain was built for the wrong architecture.
+> Download the correct one from the stnolting prebuilt releases link above —
+> specifically the package named `riscv32-unknown-elf`.
+
+#### Option B — Build from source (Linux/Fedora only, takes 30-60 minutes)
+
+Only use this if the prebuilt toolchain does not work on your system:
+
+```bash
+bash --noprofile --norc
+export PATH=/usr/bin:/bin:/usr/local/bin
+git clone https://github.com/riscv/riscv-gnu-toolchain
+cd riscv-gnu-toolchain
+./configure --prefix=/opt/riscv --with-arch=rv32i --with-abi=ilp32
+sudo make -j$(nproc)
+
+# Add to PATH
+echo 'export PATH=/opt/riscv/bin:$PATH' >> ~/.bashrc
+source ~/.bashrc
+```
 
 ### 3.5 USB Serial Port Permissions
 
@@ -138,7 +161,6 @@ sudo make install
 
 # Verify
 openocd --version
-riscv32-unknown-elf-gdb --version
 ```
 
 If GDB fails with `libpython3.8.so.1.0: No such file or directory`:
