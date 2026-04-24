@@ -108,7 +108,12 @@ git clone https://github.com/riscv/riscv-gnu-toolchain
 cd riscv-gnu-toolchain
 ./configure --prefix=/opt/riscv --with-arch=rv32i --with-abi=ilp32
 sudo make -j$(nproc)
+```
 
+You’ll need to run sudo make -j$(nproc) until the toolchain is fully installed. It builds in three stages, so you’ll have to run it three times.
+Once the installation is complete, add the toolchain to your PATH in .bashrc.
+
+```bash
 # Add to PATH
 echo 'export PATH=/opt/riscv/bin:$PATH' >> ~/.bashrc
 source ~/.bashrc
