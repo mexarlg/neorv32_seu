@@ -103,8 +103,8 @@ architecture rtl of injection_fault_SEU is
 
     constant seed   : std_ulogic_vector(31 downto 0) := x"A5C3F19B";
     type state_t is (IDLE, READ, MODIFY, WRITE);
-    signal state     : state_t := IDLE;
-    signal rand_vect : std_ulogic_vector(31 downto 0) := fibo_lfsr(seed);
+    signal state          : state_t := IDLE;
+    signal rand_vect      : std_ulogic_vector(31 downto 0) := fibo_lfsr(seed);
     signal data_faulted_s : std_ulogic_vector(DATA_LENGTH-1 downto 0);
     signal addr_s         : std_ulogic_vector(ADDRESS_LENGTH-1 downto 0);
 
@@ -112,8 +112,6 @@ begin
 
     proc_fault_injection: process(clk)
 
-        variable address_out         : std_ulogic_vector(ADDRESS_LENGTH-1 downto 0);
-        variable data_faulted        : std_ulogic_vector(DATA_LENGTH - 1 downto 0);
         variable fault_mask          : std_ulogic_vector(DATA_LENGTH - 1 downto 0);
         variable stuckatbit          : natural range 0 to DATA_LENGTH - 1;
 
@@ -143,9 +141,7 @@ begin
 
                     rw_o <= '0';
 
-                    addr_s <= std_ulogic_vector(to_unsigned(
-                        to_integer(unsigned(rand_vect(ADDRESS_LENGTH-1 downto 0))) mod MEMORY_DEPTH,
-                        ADDRESS_LENGTH));
+                    addr_s <= std_ulogic_vector(resize(unsigned(rand_vect(5 downto 0)), ADDRESS_LENGTH));
 
                     addr_o <= addr_s;
 
@@ -158,7 +154,8 @@ begin
 
                     fault_mask := (others => '0');
                     fault_mask(stuckatbit) := '1';
-
+                    
+                    
                     data_faulted_s <= data_i xor fault_mask;
 
                     state <= WRITE;
@@ -180,6 +177,7 @@ begin
            
         end if;
     end process proc_fault_injection;
+
 
 
 end architecture rtl;
