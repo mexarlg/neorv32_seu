@@ -1,5 +1,6 @@
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_package.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_sys.vhd
+NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_prim.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_fifo.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_cpu_decompressor.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_cpu_frontend.vhd
@@ -46,3 +47,4 @@ NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_debug_dtm.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_debug_auth.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_debug_dm.vhd
 NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_top.vhd
+NEORV32_RTL_PATH_PLACEHOLDER/core/neorv32_dmem_ram.vhd

@@ -24,103 +24,81 @@ entity neorv32_dmem is
     OUTREG_EN : boolean  -- implement output register stage
   );
   port (
-    clk_i     : in  std_ulogic; -- global clock line
-    rstn_i    : in  std_ulogic; -- async reset, low-active
-    bus_req_i : in  bus_req_t;  -- bus request
-    bus_rsp_o : out bus_rsp_t   -- bus response
+    clk_i     : in std_ulogic; -- global clock line
+    rstn_i    : in std_ulogic; -- async reset, low-active
+    bus_req_i : in bus_req_t;  -- bus request
+    bus_rsp_o : out bus_rsp_t  -- bus response
   );
 end neorv32_dmem;
 
 architecture neorv32_dmem_rtl of neorv32_dmem is
 
-  -- highest address bit --
-  constant addr_hi_c : natural := index_size_f(DMEM_SIZE/4)+1;
+  -- DMEM RAM wrapper --
+  -- [NOTE] We use component instantiation here to allow easy black-box instantiation for
+  -- late component binding (e.g. when using the VHDL-to-Verilog flow with Verilog memory IP).
+  component neorv32_dmem_ram
+    generic (
+      AWIDTH : natural;
+      OUTREG : natural
+    );
+    port (
+      clk_i  : in std_ulogic;
+      en_i   : in std_ulogic_vector(3 downto 0);
+      rw_i   : in std_ulogic;
+      addr_i : in std_ulogic_vector(31 downto 0);
+      data_i : in std_ulogic_vector(31 downto 0);
+      data_o : out std_ulogic_vector(31 downto 0)
+    );
+  end component;
+
+  -- auto-configuration --
+  constant awidth_c : natural := index_size_f(DMEM_SIZE);        -- address width (byte-addressing)
+  constant outreg_c : natural := sel_natural_f(OUTREG_EN, 1, 0); -- add output register?
 
   -- local signals --
   signal rdata : std_ulogic_vector(31 downto 0);
-  signal dout  : std_ulogic_vector(31 downto 0);
-  signal wack  : std_ulogic;
+  signal wren  : std_ulogic;
   signal rden  : std_ulogic_vector(1 downto 0);
-  signal addr  : unsigned(index_size_f(DMEM_SIZE/4)-1 downto 0);
-
-  -- [NOTE] The memory (RAM) is built from 4 individual byte-wide memories as some synthesis tools
-  --        have issues inferring 32-bit memories with individual byte-enable signals.
-  -- [NOTE] Read-during-write behavior is irrelevant
-  --        as read and write accesses are mutually exclusive (ensured by bus protocol).
-  signal mem_ram_b0, mem_ram_b1, mem_ram_b2, mem_ram_b3 : mem8_t(0 to DMEM_SIZE/4-1);
+  signal ben   : std_ulogic_vector(3 downto 0);
 
 begin
 
-  -- Memory Core ----------------------------------------------------------------------------
+  -- Data Memory (Wrapper) ------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
-  mem_access: process(clk_i)
-  begin
-    if rising_edge(clk_i) then
-      if (bus_req_i.stb = '1') then
-        if (bus_req_i.rw = '1') then -- write access
-          if (bus_req_i.ben(0) = '1') then -- byte 0
-            mem_ram_b0(to_integer(addr)) <= bus_req_i.data(7 downto 0);
-          end if;
-          if (bus_req_i.ben(1) = '1') then -- byte 1
-            mem_ram_b1(to_integer(addr)) <= bus_req_i.data(15 downto 8);
-          end if;
-          if (bus_req_i.ben(2) = '1') then -- byte 2
-            mem_ram_b2(to_integer(addr)) <= bus_req_i.data(23 downto 16);
-          end if;
-          if (bus_req_i.ben(3) = '1') then -- byte 3
-            mem_ram_b3(to_integer(addr)) <= bus_req_i.data(31 downto 24);
-          end if;
-        else -- read access
-          rdata(7  downto 0)  <= mem_ram_b0(to_integer(addr));
-          rdata(15 downto 8)  <= mem_ram_b1(to_integer(addr));
-          rdata(23 downto 16) <= mem_ram_b2(to_integer(addr));
-          rdata(31 downto 24) <= mem_ram_b3(to_integer(addr));
-        end if;
-      end if;
-    end if;
-  end process mem_access;
+  dmem_ram_inst : neorv32_dmem_ram
+  generic map(
+    AWIDTH => awidth_c,
+    OUTREG => outreg_c
+  )
+  port map(
+    clk_i  => clk_i,
+    en_i   => ben,
+    rw_i   => bus_req_i.rw,
+    addr_i => bus_req_i.addr,
+    data_i => bus_req_i.data,
+    data_o => rdata
+  );
 
-  -- word access address --
-  addr <= unsigned(bus_req_i.addr(addr_hi_c downto 2));
-
+  -- byte-wise enable --
+  ben <= bus_req_i.ben when (bus_req_i.stb = '1') else
+    (others => '0');
 
   -- Bus Handshake --------------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
-  bus_handshake: process(rstn_i, clk_i)
+  bus_handshake : process (rstn_i, clk_i)
   begin
     if (rstn_i = '0') then
-      wack <= '0';
+      wren <= '0';
       rden <= (others => '0');
     elsif rising_edge(clk_i) then
-      wack <= bus_req_i.stb and bus_req_i.rw;
+      wren <= bus_req_i.stb and bus_req_i.rw;
       rden <= rden(0) & (bus_req_i.stb and (not bus_req_i.rw));
     end if;
   end process bus_handshake;
 
-
-  -- Output Register Stage ------------------------------------------------------------------
-  -- -------------------------------------------------------------------------------------------
-  output_register_enabled:
-  if OUTREG_EN generate -- might improve FPGA mapping/timing results
-    ram_outreg: process(clk_i)
-    begin
-      if rising_edge(clk_i) then -- no reset required due to output gate
-        dout <= rdata;
-      end if;
-    end process ram_outreg;
-    bus_rsp_o.data <= dout when (rden(1) = '1') else (others => '0'); -- output gate
-    bus_rsp_o.err  <= '0'; -- no access error possible
-    bus_rsp_o.ack  <= rden(1) or wack;
-  end generate;
-
-  -- no output register stage --
-  output_register_disabled:
-  if not OUTREG_EN generate
-    dout           <= rdata;
-    bus_rsp_o.data <= dout when (rden(0) = '1') else (others => '0'); -- output gate
-    bus_rsp_o.err  <= '0'; -- no access error possible
-    bus_rsp_o.ack  <= rden(0) or wack;
-  end generate;
-
+  bus_rsp_o.data <= rdata when (rden(outreg_c) = '1') else
+  (others => '0'); -- output gate
+  bus_rsp_o.err <= '0';
+  bus_rsp_o.ack <= rden(outreg_c) or wren;
 
 end neorv32_dmem_rtl;
