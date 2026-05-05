@@ -52,8 +52,8 @@ architecture neorv32_dmem_rtl of neorv32_dmem is
   end component;
 
   -- auto-configuration --
-  constant awidth_c : natural := index_size_f(DMEM_SIZE);        -- address width (byte-addressing)
-  constant outreg_c : natural := sel_natural_f(OUTREG_EN, 1, 0); -- add output register?
+  constant awidth_c : natural := index_size_f(DMEM_SIZE);             -- address width (byte-addressing)
+  constant outreg_c : natural := cond_sel_natural_f(OUTREG_EN, 1, 0); -- add output register?
 
   -- local signals --
   signal rdata : std_ulogic_vector(31 downto 0);
