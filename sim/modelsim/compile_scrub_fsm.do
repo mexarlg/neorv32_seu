@@ -1,11 +1,11 @@
 #==============================================================================
-# File: name_project_compile.do
+# File: compile_scrub_fsm.do
 #
 # Description:
 #   Compiles all RTL and testbench files into the ModelSim work library.
 #
 # Usage:
-#   do compile.do
+#   do compile_scrub_fsm.do
 #
 #==============================================================================
 
@@ -33,8 +33,7 @@ vmap work work
 
 echo "Compiling RTL..."
 
-vcom -2008 ../../src/pkg/project_name_pkg.vhd
-vcom -2008 ../../src/rtl/project_name.vhd
+vcom -2008 ../../rtl/seu/neorv32_scrub_fsm.vhd
 
 
 #------------------------------------------------------------------------------
@@ -43,8 +42,7 @@ vcom -2008 ../../src/rtl/project_name.vhd
 
 echo "Compiling Testbench..."
 
-vcom -2008 ../tb/tb_project_name_pkg.vhd
-vcom -2008 ../tb/tb_project_name.vhd
+vcom -2008 ../tb/tb_neorv32_scrub_fsm.vhd
 
 
 echo "--------------------------------------------"

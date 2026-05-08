@@ -60,3 +60,17 @@ riscof_work
 # compilation
 **/build/
 *.elf
+
+# ==============================================================================
+# ModelSim generated files
+# ==============================================================================
+sim/modelsim/work/
+sim/modelsim/neorv32/
+sim/modelsim/transcript
+sim/modelsim/vsim.wlf
+sim/modelsim/wlft*
+sim/modelsim/*.wlf
+sim/modelsim/*.vstf
+sim/modelsim/*.ucdb
+sim/modelsim/modelsim.ini
+sim/modelsim/_lock
