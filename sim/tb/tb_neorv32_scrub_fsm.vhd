@@ -1,5 +1,5 @@
 --------------------------------------------------------------------------------------
--- Testbench: tb_neorv32_scrub_fsm 
+-- Testbench: tb_neorv32_scrub_fsm.vhd
 -- Author: Aldo Lupio
 -- DUT: neorv32_scrub_fsm
 -- Description: Tests the scrubber fsm interactions with cpu ram transaction stimulus
@@ -18,10 +18,11 @@ architecture sim of tb_neorv32_scrub_fsm is
     constant AWIDTH    : natural := 5; -- 32 bytes
     constant MEM_DEPTH : natural := 8; -- 32b / 4
 
-    -- clock, reset, enable
-    signal clk      : std_ulogic := '0';
-    signal rstn     : std_ulogic := '0';
-    signal scrub_en : std_ulogic := '0';
+    -- clock, reset, scrub and cpu secded enable
+    signal clk        : std_ulogic := '0';
+    signal rstn       : std_ulogic := '0';
+    signal scrub_en   : std_ulogic := '0';
+    signal cpu_ecc_en : std_ulogic := '0';
 
     -- Port A (CPU) memory interface
     signal cpu_en           : std_ulogic_vector(3 downto 0)  := "0000";
@@ -36,6 +37,18 @@ architecture sim of tb_neorv32_scrub_fsm is
     signal mem_addr_b     : std_ulogic_vector(AWIDTH - 3 downto 0);
     signal mem_data_b_out : std_ulogic_vector(31 downto 0);
     signal mem_data_b_in  : std_ulogic_vector(31 downto 0) := (others => '0');
+
+    -- Secded signals
+    signal secded_dec_data_o       : std_ulogic_vector(31 downto 0); -- Data to be checked
+    signal secded_dec_code_o       : std_logic_vector(6 downto 0);   -- Secded to be checked
+    signal secded_dec_data_i       : std_ulogic_vector(31 downto 0); -- Data fixed
+    signal secded_stat_corrected_i : std_ulogic;                     -- 1 Bit error fixed
+    signal secded_stat_detected_i  : std_ulogic;                     -- 2 Bit error deteced
+    signal secded_stat_no_error_i  : std_ulogic;                     -- Data / Code valid
+
+    -- Secded encoder module
+    signal secded_enc_data_o : std_ulogic_vector(31 downto 0); -- Data for secded computation
+    signal secded_enc_code_i : std_ulogic_vector(6 downto 0);  -- Secded computed from data
 
     -- status signals
     signal stat_error_det : std_ulogic;
@@ -71,18 +84,33 @@ begin
             MEM_DEPTH => MEM_DEPTH
         )
         port map(
-            clk_i            => clk,
-            rstn_i           => rstn,
-            scrubber_en      => scrub_en,
-            cpu_en_i         => cpu_en,
-            cpu_rw_i         => cpu_rw,
-            cpu_addr_i       => cpu_addr,
-            cpu_data_i       => cpu_data_written,
-            mem_en_b_o       => mem_en_b,
-            mem_rw_b_o       => mem_rw_b,
-            mem_addr_b_o     => mem_addr_b,
-            mem_data_b_o     => mem_data_b_out,
-            mem_data_b_i     => mem_data_b_in,
+            -- clk, rst, config
+            clk_i       => clk,
+            rstn_i      => rstn,
+            scrubber_en => scrub_en,
+            cpu_ecc_en  => cpu_ecc_en,
+            -- cpu port A
+            cpu_en_i   => cpu_en,
+            cpu_rw_i   => cpu_rw,
+            cpu_addr_i => cpu_addr,
+            cpu_data_i => cpu_data_written,
+            -- scrubber port B
+            mem_en_b_o   => mem_en_b,
+            mem_rw_b_o   => mem_rw_b,
+            mem_addr_b_o => mem_addr_b,
+            mem_data_b_o => mem_data_b_out,
+            mem_data_b_i => mem_data_b_in,
+            -- Secded decoder module
+            secded_dec_data_o       => secded_dec_data_o,
+            secded_dec_code_o       => secded_dec_code_o,
+            secded_dec_data_i       => secded_dec_data_i,
+            secded_stat_corrected_i => secded_stat_corrected_i,
+            secded_stat_detected_i  => secded_stat_detected_i,
+            secded_stat_no_error_i  => secded_stat_no_error_i,
+            -- Secded encoder module
+            secded_enc_data_o => secded_enc_data_o,
+            secded_enc_code_i => secded_enc_code_i,
+            -- Scrubber status          
             stat_error_det_o => stat_error_det,
             stat_error_fix_o => stat_error_fix,
             stat_state_o     => stat_state,
@@ -210,7 +238,8 @@ begin
         test_phase <= 3;
         report "Phase 3: Enable scrubber" severity note;
 
-        scrub_en <= '1';
+        scrub_en   <= '1';
+        cpu_ecc_en <= '1';
         wait_clk(1);
 
         assert stat_busy = '1'
@@ -301,6 +330,8 @@ begin
         -- Phase 8: CPU issues write, conflict during S_WRITE
         --------------------------------------------------------------------
         test_phase <= 8;
+        -- ecc automatically updated by cpu disable, scrubber should detect and fix
+        cpu_ecc_en <= '0';
         report "Phase 8: CPU write conflict in S_WRITE" severity note;
 
         -- inject SEU at addr 7 to force scrubber into S_WRITE
@@ -310,7 +341,9 @@ begin
         wait_scrub_check(7);
 
         -- now the FSM is about to enter S_WRITE, issue write 1 cycle after
-        cpu_write(7, std_ulogic_vector(to_unsigned(7, 32)));
+        cpu_write(7, std_ulogic_vector(to_unsigned(8, 32)));
+
+        -- parity should have changed from 0 to 1 by scrubber
 
         -- scrubber should abort correction, CPU write takes priority
         wait_clk(5);

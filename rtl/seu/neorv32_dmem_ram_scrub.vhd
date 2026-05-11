@@ -1,12 +1,14 @@
 -- ================================================================================ --
 -- NEORV32 SoC - Data Memory (DMEM) - Scrubbing RAM Wrapper                         --
 -- -------------------------------------------------------------------------------- --
--- Replaces neorv32_dmem_ram with a dual-port version that adds a background        --
+-- Replaces neorv32_dmem_ram with a dual port version that adds a background        --
 -- scrubbing controller on Port B. Port A preserves the exact same interface as     --
--- the original neorv32_dmem_ram so neorv32_dmem.vhd requires no changes.           --
+-- the original neorv32_dmem_ram                                                    --
 -- Port B is used exclusively by the internal scrubber state machine.               --
 -- Collision handling (CPU write + scrubber read to same address) is managed        --
--- internally. ECC is implemented as single-bit parity per 32-bit word.             --
+-- internally. ECC is implemented as SECDED for 32-bit words                        --
+--                                                                                  --
+--      Author: Aldo Lupio - 2026                                                   --
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
 -- Copyright (c) NEORV32 contributors.                                              --
@@ -31,6 +33,7 @@ entity neorv32_dmem_ram_scrub is
         clk_i       : in std_ulogic; -- clock, rising-edge
         rstn_i      : in std_ulogic; -- async reset, low-active
         scrubber_en : in std_ulogic; -- software-controlled scrubber enable
+        cpu_ecc_en  : in std_ulogic; -- ecc enable for cpu wr ops
         -- cpu ram access
         en_i   : in std_ulogic_vector(3 downto 0);   -- byte-wise access-enable (CPU port A)
         rw_i   : in std_ulogic;                      -- 0=read, 1=write (CPU port A)
@@ -53,12 +56,24 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     -- memory depth in 32-bit words
     constant MEM_DEPTH : natural := (2 ** AWIDTH) / 4;
 
-    -- Port B internal signals (FSM ? DPRAM)
+    -- Port B internal signals (FSM DPRAM)
     signal scrub_en_b   : std_ulogic;                             -- FSM single-bit enable
     signal scrub_rw_b   : std_ulogic;                             -- FSM read/write
     signal scrub_addr_b : std_ulogic_vector(AWIDTH - 3 downto 0); -- FSM word address
     signal scrub_din_b  : std_ulogic_vector(31 downto 0);         -- FSM write data
     signal scrub_dout_b : std_ulogic_vector(31 downto 0);         -- DPRAM read data to FSM
+
+    -- Secded decoder module
+    signal secded_dec_data_o       : std_ulogic_vector(31 downto 0); -- Data to be checked
+    signal secded_dec_code_o       : std_logic_vector(6 downto 0);   -- Secded to be checked
+    signal secded_dec_data_i       : std_ulogic_vector(31 downto 0); -- Data fixed
+    signal secded_stat_corrected_i : std_ulogic;                     -- 1 Bit error fixed
+    signal secded_stat_detected_i  : std_ulogic;                     -- 2 Bit error deteced
+    signal secded_stat_no_error_i  : std_ulogic;                     -- Data / Code valid
+
+    -- Secded encoder module
+    signal secded_enc_data_o : std_ulogic_vector(31 downto 0); -- Data for secded computation
+    signal secded_enc_code_i : std_ulogic_vector(6 downto 0);  -- Secded computed from data
 
     -- Port B byte-lane enable (scrubber always accesses full words)
     signal scrub_ben_b : std_ulogic_vector(3 downto 0);
@@ -66,7 +81,7 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
 begin
 
     -- =========================================================================
-    -- Port B byte enables ? scrubber accesses full 32-bit words only
+    -- Port B byte enables scrubber accesses full 32-bit words only
     -- =========================================================================
     scrub_ben_b <= (others => scrub_en_b);
     -- =========================================================================
@@ -84,13 +99,13 @@ begin
             )
             port map(
                 clk_i => clk_i,
-                -- Port A ? CPU
+                -- Port A CPU
                 en_a_i   => en_i(i),
                 rw_a_i   => rw_i,
                 addr_a_i => addr_i(AWIDTH - 1 downto 2),
                 data_a_i => data_i(i * 8 + 7 downto i * 8),
                 data_a_o => data_o(i * 8 + 7 downto i * 8),
-                -- Port B ? scrubber
+                -- Port B scrubber
                 en_b_i   => scrub_ben_b(i),
                 rw_b_i   => scrub_rw_b,
                 addr_b_i => scrub_addr_b,
@@ -100,7 +115,7 @@ begin
     end generate;
 
     -- =========================================================================
-    -- Scrubber FSM ? drives Port B, observes Port A for collisions
+    -- Scrubber FSM drives Port B, observes Port A for collisions
     -- =========================================================================
     scrub_fsm_inst : entity neorv32.neorv32_scrub_fsm
         generic map(
@@ -111,6 +126,7 @@ begin
             clk_i       => clk_i,
             rstn_i      => rstn_i,
             scrubber_en => scrubber_en,
+            cpu_ecc_en  => cpu_ecc_en,
             -- CPU observation (directly wired from entity ports)
             cpu_en_i   => en_i,
             cpu_rw_i   => rw_i,
@@ -122,6 +138,16 @@ begin
             mem_addr_b_o => scrub_addr_b,
             mem_data_b_o => scrub_din_b,
             mem_data_b_i => scrub_dout_b,
+            -- Secded decoder module
+            secded_dec_data_o       => secded_dec_data_o,
+            secded_dec_code_o       => secded_dec_code_o,
+            secded_dec_data_i       => secded_dec_data_i,
+            secded_stat_corrected_i => secded_stat_corrected_i,
+            secded_stat_detected_i  => secded_stat_detected_i,
+            secded_stat_no_error_i  => secded_stat_no_error_i,
+            -- Secded encoder module
+            secded_enc_data_o => secded_enc_data_o,
+            secded_enc_code_i => secded_enc_code_i,
             -- status/debug passthrough
             stat_error_det_o => stat_error_det_o,
             stat_error_fix_o => stat_error_fix_o,

@@ -8,6 +8,13 @@
 -- Collision handling: when the CPU writes to the same address the scrubber is      --
 -- acessing, the scrubber stalls. The CPU is never affected.                        --
 --                                                                                  --
+--      Author: Aldo Lupio - 2026                                                   --
+-- -------------------------------------------------------------------------------- --
+-- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
+-- Copyright (c) NEORV32 contributors.                                              --
+-- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  --
+-- Licensed under the BSD-3-Clause license, see LICENSE for details.                --
+-- SPDX-License-Identifier: BSD-3-Clause                                            --
 -- ================================================================================ --
 
 library ieee;
@@ -24,6 +31,7 @@ entity neorv32_scrub_fsm is
         clk_i       : in std_ulogic; -- clock, rising edge
         rstn_i      : in std_ulogic; -- async reset, low-active
         scrubber_en : in std_ulogic; -- scrubber enable
+        cpu_ecc_en  : in std_ulogic; -- ecc enable for cpu write operations
 
         -- Port A (CPU)
         cpu_en_i   : in std_ulogic_vector(3 downto 0);  -- CPU byte enables
@@ -38,7 +46,19 @@ entity neorv32_scrub_fsm is
         mem_data_b_o : out std_ulogic_vector(31 downto 0);         -- Port B write data
         mem_data_b_i : in std_ulogic_vector(31 downto 0);          -- Port B read data
 
-        -- Status
+        -- Secded decoder module
+        secded_dec_data_o       : out std_ulogic_vector(31 downto 0); -- Data to be checked
+        secded_dec_code_o       : out std_logic_vector(6 downto 0);   -- Secded to be checked
+        secded_dec_data_i       : in std_ulogic_vector(31 downto 0);  -- Data fixed
+        secded_stat_corrected_i : in std_ulogic;                      -- 1 Bit error fixed
+        secded_stat_detected_i  : in std_ulogic;                      -- 2 Bit error deteced
+        secded_stat_no_error_i  : in std_ulogic;                      -- Data / Code valid
+
+        -- Secded encoder module
+        secded_enc_data_o : out std_ulogic_vector(31 downto 0); -- Data for secded computation
+        secded_enc_code_i : in std_ulogic_vector(6 downto 0);   -- Secded computed from data
+
+        -- Scrubber status
         stat_error_det_o : out std_ulogic;                    -- parity mismatch detected (pulse)
         stat_error_fix_o : out std_ulogic;                    -- parity fixed on ecc ram (pulse)
         stat_state_o     : out std_ulogic_vector(2 downto 0); -- FSM state encoded
@@ -130,7 +150,9 @@ begin
     begin
         if rising_edge(clk_i) then
             if (cpu_writing = '1') then
-                ecc_ram(cpu_word_addr) <= cpu_parity;
+                if (cpu_ecc_en = '1') then
+                    ecc_ram(cpu_word_addr) <= cpu_parity;
+                end if;
             elsif (ecc_wr_en = '1') then
                 ecc_ram(scrub_ptr) <= scrub_parity;
             end if;
