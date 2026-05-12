@@ -5,37 +5,47 @@
 --  Description :
 --      Testbench for the combinational injection_fault module.
 --
---      The DUT is used to simulate:
---          - transient bit-flip faults using a fault mask
+--      The DUT is used to validate two fault models:
+--          - transient bit-flip faults using fault_mask and match
 --          - permanent stuck-at faults on a selected bit
 --
---      The transient fault model flips one or more bits when fault injection is
---      enabled and both transient_fault and match are asserted.
+--      TEST 1 forces match = '1' to deterministically verify transient
+--      bit-flip injection on a randomly selected bit.
 --
---      The permanent fault model forces one selected bit to a constant value
---      defined by stuckatvalue. This models a stuck-at-0 or stuck-at-1 fault,
---      not a stored SEU.
+--      TEST 2 verifies stuck-at fault behavior by forcing a selected bit to
+--      stucked_value across several random input vectors.
+--
+--      This testbench uses a 32-bit LFSR-based pseudo-random generator to
+--      generate input vectors, selected bit positions, and stuck-at values.
 --
 --  Tests:
 --      TEST 1:
---          Verifies transient fault injection by applying a single-bit mask and
---          checking that the selected bit is flipped.
+--          Verifies transient SET-like bit-flip injection by applying a
+--          single-bit mask and checking that the selected bit is flipped.
 --
 --      TEST 2:
---          Verifies permanent stuck-at fault injection by forcing a selected bit
---          to stuckatvalue across several input vectors.
+--          Verifies permanent stuck-at fault injection by forcing one selected
+--          bit to stucked_value across multiple input vectors.
 --
---  Fault priority expected from DUT:
+--  Expected DUT priority:
 --      permanent_fault > transient_fault > normal operation
 --
 --  Author      : Olivier Oribes
 --  Created     : 26/04/2026
---  Last update : 28/04/2026
+--  Last update : 29/04/2026
 --
---  Version     : 1.1
+--  Version     : 1.2
 --
---  Project     : CPU_Single_cycle
---  Language    : VHDL
+--  Project     : Neorv32-SEU
+--  Language    : VHDL-2008
+--
+--  Dependencies:
+--      - injection_fault.vhd
+--
+--  Notes:
+--      - match is manually forced in this testbench.
+--      - The probabilistic controller is not tested here.
+--      - This testbench must be compiled in VHDL-2008 mode.
 --
 --  License     : MIT
 --==============================================================================

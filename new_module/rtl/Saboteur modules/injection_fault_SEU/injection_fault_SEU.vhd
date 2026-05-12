@@ -26,9 +26,9 @@
 --
 --  Author      : Olivier Oribes
 --  Created     : 30/04/2026
---  Last update : 30/04/2026
+--  Last update : 01/05/2026
 --
---  Version     : 1.0
+--  Version     : 1.1
 --
 --  Project     : Neorv32_SEU
 --  Language    : VHDL
@@ -141,7 +141,12 @@ begin
 
                     rw_o <= '0';
 
-                    addr_s <= std_ulogic_vector(resize(unsigned(rand_vect(5 downto 0)), ADDRESS_LENGTH));
+                    addr_s <= std_ulogic_vector(
+                        to_unsigned(
+                            to_integer(unsigned(rand_vect(5 downto 0))) mod MEMORY_DEPTH,
+                            ADDRESS_LENGTH
+                        )
+                    );
 
                     addr_o <= addr_s;
 

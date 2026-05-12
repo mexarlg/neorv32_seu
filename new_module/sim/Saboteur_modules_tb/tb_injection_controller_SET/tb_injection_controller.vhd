@@ -1,31 +1,58 @@
--- ==============================================================================
---  Module      : Fault_injection_controller testbench
+--==============================================================================
+--  Testbench   : Fault Injection Controller Testbench
 --  File        : tb_fault_injection_controller.vhd
 --
+--  Description :
+--      Testbench for the fault_injection_controller module.
+--
+--      The DUT generates a probabilistic match signal based on the comparison
+--      of the least significant bits of two internal LFSRs. The number of bits
+--      compared (nbr_bits_to_match) controls the injection probability:
+--
+--          P(match) = 1 / 2^N   with N = nbr_bits_to_match
+--
+--      This testbench validates:
+--          - deterministic behavior (100% and 0% match cases)
+--          - correct disabling of the module via fault_enable
+--          - statistical correctness of the generated match rate
+--
+--  Tests:
+--      TEST 1:
+--          Verifies 100% match rate when nbr_bits_to_match = 0.
+--
+--      TEST 2:
+--          Verifies match is always '0' when fault_enable = '0'.
+--
+--      TEST 3:
+--          Verifies statistical correctness of match probability for
+--          nbr_bits_to_match in [1..15], using a large number of samples.
+--
+--  Methodology:
+--      - A 16-bit LFSR is used in the testbench to generate pseudo-random
+--        values for dynamic test conditions.
+--      - Statistical validation is performed by measuring the observed rate
+--        of match events and comparing it to the theoretical probability.
+--      - A tolerance EPSILON is used to validate convergence.
 --
 --  Author      : Olivier Oribes
 --  Created     : 28/04/2026
---  Last update : 28/04/2026
+--  Last update : 29/04/2026
 --
---  Version     : 1.0
+--  Version     : 1.1
 --
 --  Project     : Neorv32_SEU
---  Language    : VHDL
+--  Language    : VHDL-2008
 --
 --  Dependencies:
---      - injection_fault.vhd (consumes the match signal)
+--      - fault_injection_controller.vhd
 --
---  Generics:
---      None
---
---  Ports:
---      clk               : input  - System clock
---      rst_n             : input  - Asynchronous active-low reset
---      nbr_bits_to_match : input  - Number of LSBs to compare (controls injection rate)
---      match             : output - Probabilistic trigger signal for fault injection
+--  Notes:
+--      - This testbench assumes maximal-length LFSRs inside the DUT.
+--      - Large sample size (N = 1_000_000) is used for statistical accuracy.
+--      - Compile with VHDL-2008 support.
 --
 --  License     : MIT
--- ==============================================================================
+--==============================================================================
 
 library ieee;
 library work;

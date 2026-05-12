@@ -1,6 +1,6 @@
 -- ==============================================================================
 --  Module      : Injection Fault
---  File        : injection_fault.vhd
+--  File        : injection_fault_SET.vhd
 --
 --  Description :
 --      Combinational fault injection block used to simulate transient faults
@@ -44,7 +44,7 @@
 --
 --  Version     : 1.1
 --
---  Project     : CPU_Single_cycle
+--  Project     : Neorv32_SEU
 --  Language    : VHDL
 --
 --  Dependencies:
