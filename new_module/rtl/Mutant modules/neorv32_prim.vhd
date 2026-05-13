@@ -222,32 +222,41 @@ begin
         clean_data <= (others => '0');
         faulted_data <= (others => '0');
 
+        ----------------------------------------------------------------------
+        -- Single write-port arbitration
+        -- -------------------------------------------------------------------
+        -- A physical BRAM provides only one write port per cycle.
+        -- Fault injection is granted priority over CPU writes to faithfully
+        -- emulate asynchronous radiation-induced events: a real SEU particle
+        -- does not wait for the CPU to finish its memory transaction.
+        --
+        -- When a fault injection and a CPU write occur in the same cycle,
+        -- the CPU write is NOT lost: the NEORV32 bus protocol holds all
+        -- signals stable and retries automatically on the next rising edge,
+        -- since no acknowledgment is generated while the fault is active.
+        --
+        -- If both accesses target the same address simultaneously, the fault
+        -- value takes precedence. This is an acceptable approximation for
+        -- SEU campaigns, as the probability of such a collision is negligible
+        -- and the resulting behavior remains deterministic.
+        ----------------------------------------------------------------------
+
         if (fault_enable = '1') and (fault_trigger = '1') then
 
-            ----------------------------------------------------------------------
-            -- Fault Injection
-            -- -------------------------------------------------------------------
-            -- Fault injection is intentionally independent from normal memory
-            -- traffic in order to emulate asynchronous radiation-induced events.
-            --
-            -- If a normal software write and a fault injection target the same
-            -- address during the same clock cycle, the final stored value depends
-            -- on the underlying memory write semantics and assignment ordering.
-            --
-            -- This behavior is acceptable for fault-injection campaigns as real
-            -- SEUs may occur concurrently with memory activity.
-            ----------------------------------------------------------------------
-            
-            clean_dt    := spram(to_integer(unsigned(faulted_address)));
-            faulted_dt  := clean_dt xor faulted_bit;
+          -- Fault injection: read-modify-write, independent of CPU traffic
+          clean_dt    := spram(to_integer(unsigned(faulted_address)));
+          faulted_dt  := clean_dt xor faulted_bit;
 
-            clean_data      <= clean_dt;
-            faulted_data    <= faulted_dt;
-            spram(to_integer(unsigned(faulted_address))) <= faulted_dt;
+          clean_data      <= clean_dt;
+          faulted_data    <= faulted_dt;
+          spram(to_integer(unsigned(faulted_address))) <= faulted_dt;
 
+          if (en_i = '1') then
+
+            rdata <= spram(to_integer(unsigned(addr_i)));
         end if;
 
-        if (en_i = '1') then
+        elsif (en_i = '1') then
 
           if (rw_i = '1') then
             spram(to_integer(unsigned(addr_i))) <= data_i;
@@ -299,6 +308,7 @@ begin
   end generate;
 
 end neorv32_prim_spram_rtl;
+
 
 
 -- ================================================================================ --

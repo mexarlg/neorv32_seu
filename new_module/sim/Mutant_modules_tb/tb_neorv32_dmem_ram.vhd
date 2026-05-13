@@ -134,6 +134,7 @@ architecture sim of tb_neorv32_dmem_ram is
     signal data_o : std_ulogic_vector(31 downto 0);  -- read data, sync
 
     -- SEU injection fault setting ----------------------------------
+    signal rst_n           :  std_ulogic;
     signal fault_enable    :  std_ulogic;
     signal fault_trigger   :  std_ulogic;
     signal faulted_bit     :  std_ulogic_vector(31 downto 0);
@@ -165,6 +166,7 @@ begin
             data_o  => data_o,
 
             -- SEU injection fault setting ---------------
+            rst_n           => rst_n,
             fault_enable    => fault_enable,
             fault_trigger   => fault_trigger,
             faulted_address => faulted_address,
@@ -507,6 +509,17 @@ begin
         end if;
         
 
+        -- =========================================================================
+        -- TEST RST_N : synchronous active-low reset
+        -- -------------------------------------------------------------------------
+        -- Verifies that after reset:
+        --   - randvect is restored to seed x"A5C3F19B"
+        --   - at_bit is cleared to 0
+        -- Since randvect is internal, we observe its effect indirectly:
+        --   two consecutive injections after reset must produce the same
+        --   faulted_address and at_bit as two fresh injections from the seed.
+        -- =========================================================================
+        --report "Starting TEST RST_N..." severity note;
 
 
 

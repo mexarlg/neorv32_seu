@@ -30,6 +30,7 @@ entity neorv32_dmem_ram is
     data_o : out std_ulogic_vector(31 downto 0);  -- read data, sync
 
     -- SEU injection fault setting ----------------------------------
+    rst_n           : in std_ulogic;
     fault_enable    : in  std_ulogic;
     fault_trigger   : in  std_ulogic;
     at_bit          : out std_ulogic_vector(4 downto 0);
@@ -45,25 +46,24 @@ entity neorv32_dmem_ram is
 end neorv32_dmem_ram;
 
 architecture neorv32_dmem_ram_rtl of neorv32_dmem_ram is
-
-  -----------------------------------------------------------------------------
-  -- Fault Injection Control
-  -- --------------------------------------------------------------------------
-  -- The DMEM wrapper centrally generates:
-  --   - a pseudo-random target word address,
-  --   - a fault mask describing which bits will be corrupted.
-  --
-  -- Two fault modes are supported:
-  --
-  --   * SBU (Single-Bit Upset):
-  --       exactly one randomly selected bit is flipped.
-  --
-  --   * MBU (Multi-Bit Upset):
-  --       the user-provided mask directly defines corrupted bits.
-  --
-  -- The generated 32-bit fault mask is then distributed across the four
-  -- byte-wide SPRAM instances.
-  -----------------------------------------------------------------------------
+-----------------------------------------------------------------------------
+-- Fault Injection Control
+-- --------------------------------------------------------------------------
+-- The DMEM wrapper centrally generates:
+--   - a pseudo-random target word address,
+--   - a fault mask describing which bits will be corrupted.
+--
+-- Two fault modes are supported:
+--
+--   * SBU (Single-Bit Upset):
+--       exactly one randomly selected bit is flipped.
+--
+--   * MBU (Multi-Bit Upset):
+--       the user-provided mask directly defines corrupted bits.
+--
+-- The generated 32-bit fault mask is then distributed across the four
+-- byte-wide SPRAM instances.
+-----------------------------------------------------------------------------
 
   -- Signals
   signal fault_word_addr : std_ulogic_vector(AWIDTH-3 downto 0);
@@ -131,8 +131,13 @@ begin
 
     if rising_edge(clk_i) then
 
-      if (fault_enable = '1') and (fault_trigger = '1') then
+      if (rst_n = '0') then                        -- sync reset, active low
 
+        randvect <= x"A5C3F19B";
+        at_bit   <= (others => '0');
+
+      elsif (fault_enable = '1') and (fault_trigger = '1') then
+        
         -- Advance the LFSR for the next injection cycle
         randvect <= next_rand;
 
@@ -150,6 +155,7 @@ begin
       end if;
     end if;
   end process seq_proc;
+  
 
   ---------------------------------------------------------------------------
   -- Physical DMEM Organization
