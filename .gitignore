@@ -11,7 +11,7 @@ build/*
 *.vcd
 *.fst
 *.ghw
-
+transcript
 # host executables
 sw/image_gen/image_gen
 *.exe
@@ -60,3 +60,15 @@ riscof_work
 # compilation
 **/build/
 *.elf
+
+
+# ModelSim / Questa
+work/
+*.wlf
+transcript
+*.mpf
+*.cr.mti
+*.qdb
+*.qpg
+*.qtl
+modelsim.ini

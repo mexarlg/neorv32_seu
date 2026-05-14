@@ -250,12 +250,7 @@ begin
           clean_data      <= clean_dt;
           faulted_data    <= faulted_dt;
           spram(to_integer(unsigned(faulted_address))) <= faulted_dt;
-
-          if (en_i = '1') then
-
-            rdata <= spram(to_integer(unsigned(addr_i)));
-        end if;
-
+          
         elsif (en_i = '1') then
 
           if (rw_i = '1') then
