@@ -1,167 +1,211 @@
--- ================================================================================ --
--- NEORV32 SoC - Data Memory (DMEM) - Scrubbing RAM Wrapper                         --
 -- -------------------------------------------------------------------------------- --
--- Replaces neorv32_dmem_ram with a dual port version that adds a background        --
--- scrubbing controller on Port B. Port A preserves the exact same interface as     --
--- the original neorv32_dmem_ram                                                    --
--- Port B is used exclusively by the internal scrubber state machine.               --
--- Collision handling (CPU write + scrubber read to same address) is managed        --
--- internally. ECC is implemented as SECDED for 32-bit words                        --
---                                                                                  --
---      Author: Aldo Lupio - 2026                                                   --
+-- NEORV32 SoC - Data Memory (DMEM) Scrubbing RAM Wrapper                           --
 -- -------------------------------------------------------------------------------- --
--- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32              --
--- Copyright (c) NEORV32 contributors.                                              --
--- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                  --
--- Licensed under the BSD-3-Clause license, see LICENSE for details.                --
--- SPDX-License-Identifier: BSD-3-Clause                                            --
--- ================================================================================ --
+-- Replaces neorv32_dmem with a dual port version that adds a background             --
+-- scrubbing controller on Port B. Port A preserves the exact same interface         --
+-- Port B is used exclusively by the internal scrubber state machine.                --
+-- Collision handling (CPU write + scrubber access to same address) is managed        --
+-- internally by the scrubber FSM. ECC is SECDED for 32-bit words.                   --
+--                                                                                   --
+-- The dual port RAM is inferred from a standard VHDL template. Vivado will          --
+-- map it to BRAM36 primitives automatically. No vendor IP dependency.               --
+--                                                                                   --
+--      Author: Aldo Lupio - 2026                                                    --
+-- -------------------------------------------------------------------------------- --
+-- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32               --
+-- Copyright (c) NEORV32 contributors.                                               --
+-- Copyright (c) 2020 - 2025 Stephan Nolting. All rights reserved.                   --
+-- Licensed under the BSD-3-Clause license, see LICENSE for details.                 --
+-- SPDX-License-Identifier: BSD-3-Clause                                             --
+-- -------------------------------------------------------------------------------- --
 
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-library neorv32;
-use neorv32.neorv32_package.all;
-
-entity neorv32_dmem_ram_scrub is
+entity neorv32_dmem_scrub is
     generic (
-        AWIDTH : natural; -- address width (byte address)
-        OUTREG : natural  -- add output register stage when 1
+        DMEM_AWIDTH : natural; -- byte address width
+        DMEM_OUTREG : boolean  -- add output register stage on Port A reads
     );
     port (
-        clk_i       : in std_ulogic; -- clock, rising-edge
-        rstn_i      : in std_ulogic; -- async reset, low-active
-        scrubber_en : in std_ulogic; -- software-controlled scrubber enable
-        cpu_ecc_en  : in std_ulogic; -- ecc enable for cpu wr ops
-        -- cpu ram access
-        en_i   : in std_ulogic_vector(3 downto 0);   -- byte-wise access-enable (CPU port A)
-        rw_i   : in std_ulogic;                      -- 0=read, 1=write (CPU port A)
-        addr_i : in std_ulogic_vector(31 downto 0);  -- full byte address (CPU port A)
-        data_i : in std_ulogic_vector(31 downto 0);  -- write data (CPU port A)
-        data_o : out std_ulogic_vector(31 downto 0); -- read data, sync (CPU port A)
-        -- status/debug --
-        stat_error_det_o : out std_ulogic;
-        stat_error_fix_o : out std_ulogic;
-        stat_state_o     : out std_ulogic_vector(2 downto 0);
-        stat_ptr_o       : out std_ulogic_vector(AWIDTH - 3 downto 0);
-        stat_conflict_o  : out std_ulogic;
-        stat_busy_o      : out std_ulogic;
-        stat_full_pass_o : out std_ulogic
+        -- Global control
+        clk_i      : in std_ulogic;
+        rstn_i     : in std_ulogic;
+        scrub_en_i : in std_ulogic;
+
+        -- Port A: CPU interface (same as original neorv32_dmem)
+        cpu_ben_i  : in std_ulogic_vector(3 downto 0);
+        cpu_rw_i   : in std_ulogic;
+        cpu_addr_i : in std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+        cpu_data_i : in std_ulogic_vector(31 downto 0);
+        cpu_data_o : out std_ulogic_vector(31 downto 0);
+
+        -- Fault log (software readable)
+        flog_clear_i     : in std_ulogic;
+        flog_last_addr_o : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+        flog_count_o     : out std_ulogic_vector(2 downto 0);
+        flog_overflow_o  : out std_ulogic;
+
+        -- Scrubber status
+        stat_data_valid_o : out std_ulogic;
+        stat_corrected_o  : out std_ulogic;
+        stat_detected_o   : out std_ulogic;
+        stat_state_o      : out std_ulogic_vector(2 downto 0);
+        stat_addr_o       : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+        stat_conflict_o   : out std_ulogic;
+        stat_busy_o       : out std_ulogic;
+        stat_full_pass_o  : out std_ulogic
     );
-end neorv32_dmem_ram_scrub;
+end neorv32_dmem_scrub;
 
-architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
+architecture neorv32_dmem_scrub_rtl of neorv32_dmem_scrub is
 
-    -- memory depth in 32-bit words
-    constant MEM_DEPTH : natural := (2 ** AWIDTH) / 4;
+    -- -------------------------------------------------------------------------
+    -- Memory configuration
+    -- -------------------------------------------------------------------------
+    constant MEM_DEPTH    : natural := (2 ** DMEM_AWIDTH) / 4;
+    constant WORD_ADDR_HI : natural := DMEM_AWIDTH - 1;
+    constant WORD_ADDR_LO : natural := 2;
 
-    -- Port B internal signals (FSM DPRAM)
-    signal scrub_en_b   : std_ulogic;                             -- FSM single-bit enable
-    signal scrub_rw_b   : std_ulogic;                             -- FSM read/write
-    signal scrub_addr_b : std_ulogic_vector(AWIDTH - 3 downto 0); -- FSM word address
-    signal scrub_din_b  : std_ulogic_vector(31 downto 0);         -- FSM write data
-    signal scrub_dout_b : std_ulogic_vector(31 downto 0);         -- DPRAM read data to FSM
+    -- -------------------------------------------------------------------------
+    -- Word addresses for RAM access
+    -- -------------------------------------------------------------------------
+    signal addr_a : std_ulogic_vector(WORD_ADDR_HI - WORD_ADDR_LO downto 0);
+    signal addr_b : std_ulogic_vector(WORD_ADDR_HI - WORD_ADDR_LO downto 0);
 
-    -- Secded decoder module
-    signal secded_dec_data_o       : std_ulogic_vector(31 downto 0); -- Data to be checked
-    signal secded_dec_code_o       : std_logic_vector(6 downto 0);   -- Secded to be checked
-    signal secded_dec_data_i       : std_ulogic_vector(31 downto 0); -- Data fixed
-    signal secded_stat_corrected_i : std_ulogic;                     -- 1 Bit error fixed
-    signal secded_stat_detected_i  : std_ulogic;                     -- 2 Bit error deteced
-    signal secded_stat_no_error_i  : std_ulogic;                     -- Data / Code valid
+    -- -------------------------------------------------------------------------
+    -- Port A read data (before optional output register)
+    -- -------------------------------------------------------------------------
+    signal mem_a_rdata  : std_ulogic_vector(31 downto 0);
+    signal cpu_data_reg : std_ulogic_vector(31 downto 0);
 
-    -- Secded encoder module
-    signal secded_enc_data_o : std_ulogic_vector(31 downto 0); -- Data for secded computation
-    signal secded_enc_code_i : std_ulogic_vector(6 downto 0);  -- Secded computed from data
-
-    -- Port B byte-lane enable (scrubber always accesses full words)
-    signal scrub_ben_b : std_ulogic_vector(3 downto 0);
+    -- -------------------------------------------------------------------------
+    -- Scrubber FSM signals (Port B)
+    -- -------------------------------------------------------------------------
+    signal scrub_en    : std_ulogic;
+    signal scrub_rw    : std_ulogic;
+    signal scrub_addr  : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    signal scrub_wdata : std_ulogic_vector(31 downto 0);
+    signal scrub_rdata : std_ulogic_vector(31 downto 0);
 
 begin
 
-    -- =========================================================================
-    -- Port B byte enables scrubber accesses full 32-bit words only
-    -- =========================================================================
-    scrub_ben_b <= (others => scrub_en_b);
-    -- =========================================================================
-    -- 4x byte-wide dual-port RAMs
-    -- Port A = CPU (directly wired from entity ports)
-    -- Port B = scrubber (driven by FSM instance below)
-    -- =========================================================================
-    ram_gen :
-    for i in 0 to 3 generate
-        ram_inst : entity neorv32.neorv32_prim_dpram
-            generic map(
-                AWIDTH => AWIDTH - 2,
-                DWIDTH => 8,
-                OUTREG => OUTREG
-            )
-            port map(
-                clk_i => clk_i,
-                -- Port A CPU
-                en_a_i   => en_i(i),
-                rw_a_i   => rw_i,
-                addr_a_i => addr_i(AWIDTH - 1 downto 2),
-                data_a_i => data_i(i * 8 + 7 downto i * 8),
-                data_a_o => data_o(i * 8 + 7 downto i * 8),
-                -- Port B scrubber
-                en_b_i   => scrub_ben_b(i),
-                rw_b_i   => scrub_rw_b,
-                addr_b_i => scrub_addr_b,
-                data_b_i => scrub_din_b(i * 8 + 7 downto i * 8),
-                data_b_o => scrub_dout_b(i * 8 + 7 downto i * 8)
-            );
-    end generate;
+    -- -------------------------------------------------------------------------
+    -- Word address extraction
+    -- -------------------------------------------------------------------------
+    addr_a <= cpu_addr_i(WORD_ADDR_HI downto WORD_ADDR_LO);
+    addr_b <= scrub_addr(WORD_ADDR_HI downto WORD_ADDR_LO);
 
-    -- =========================================================================
-    -- Scrubber FSM drives Port B, observes Port A for collisions
-    -- =========================================================================
-    scrub_fsm_inst : entity neorv32.neorv32_scrub_fsm
+    -- -------------------------------------------------------------------------
+    -- 4x byte-wide true dual-port RAMs
+    --
+    -- Each instance is 8 bits wide and MEM_DEPTH deep. This follows the
+    -- standard Vivado true dual-port BRAM inference template: one process
+    -- per port, synchronous read and write, no async reset on storage.
+    --
+    -- Port A: CPU (byte enable controlled via generate index)
+    -- Port B: Scrubber (always full word, gated by scrub_en)
+    -- -------------------------------------------------------------------------
+    gen_byte_ram : for i in 0 to 3 generate
+
+        signal ram : std_ulogic_vector(7 downto 0);
+
+        -- Per-byte-lane RAM array
+        type ram_t is array (0 to MEM_DEPTH - 1) of std_ulogic_vector(7 downto 0);
+        signal mem : ram_t := (others => (others => '0'));
+
+    begin
+
+        -- Port A: CPU access
+        p_port_a : process (clk_i)
+        begin
+            if rising_edge(clk_i) then
+                if (cpu_ben_i(i) = '1') and (cpu_rw_i = '1') then
+                    mem(to_integer(unsigned(addr_a))) <= cpu_data_i(i * 8 + 7 downto i * 8);
+                end if;
+                mem_a_rdata(i * 8 + 7 downto i * 8) <= mem(to_integer(unsigned(addr_a)));
+            end if;
+        end process p_port_a;
+
+        -- Port B: Scrubber access
+        p_port_b : process (clk_i)
+        begin
+            if rising_edge(clk_i) then
+                if (scrub_en = '1') then
+                    if (scrub_rw = '1') then
+                        mem(to_integer(unsigned(addr_b))) <= scrub_wdata(i * 8 + 7 downto i * 8);
+                    end if;
+                    scrub_rdata(i * 8 + 7 downto i * 8) <= mem(to_integer(unsigned(addr_b)));
+                end if;
+            end if;
+        end process p_port_b;
+
+    end generate gen_byte_ram;
+
+    -- -------------------------------------------------------------------------
+    -- Port A output register (optional)
+    -- -------------------------------------------------------------------------
+    gen_outreg : if DMEM_OUTREG generate
+        p_outreg : process (clk_i)
+        begin
+            if rising_edge(clk_i) then
+                cpu_data_reg <= mem_a_rdata;
+            end if;
+        end process p_outreg;
+        cpu_data_o <= cpu_data_reg;
+    end generate gen_outreg;
+
+    gen_no_outreg : if not DMEM_OUTREG generate
+        cpu_data_o <= mem_a_rdata;
+    end generate gen_no_outreg;
+
+    -- -------------------------------------------------------------------------
+    -- Scrubber FSM: drives Port B, observes Port A
+    -- -------------------------------------------------------------------------
+    u_scrub_fsm : entity work.neorv32_scrub_fsm
         generic map(
-            AWIDTH    => AWIDTH,
-            MEM_DEPTH => MEM_DEPTH
+            DMEM_AWIDTH => DMEM_AWIDTH,
+            DMEM_DEPTH  => MEM_DEPTH
         )
         port map(
-            clk_i       => clk_i,
-            rstn_i      => rstn_i,
-            scrubber_en => scrubber_en,
-            cpu_ecc_en  => cpu_ecc_en,
-            -- CPU observation (directly wired from entity ports)
-            cpu_en_i   => en_i,
-            cpu_rw_i   => rw_i,
-            cpu_addr_i => addr_i,
-            cpu_data_i => data_i,
+            -- Global control
+            clk_i      => clk_i,
+            rstn_i     => rstn_i,
+            scrub_en_i => scrub_en_i,
+            -- CPU write monitoring
+            cpu_ben_i  => cpu_ben_i,
+            cpu_rw_i   => cpu_rw_i,
+            cpu_addr_i => cpu_addr_i,
+            cpu_data_i => cpu_data_i,
             -- Port B memory interface
-            mem_en_b_o   => scrub_en_b,
-            mem_rw_b_o   => scrub_rw_b,
-            mem_addr_b_o => scrub_addr_b,
-            mem_data_b_o => scrub_din_b,
-            mem_data_b_i => scrub_dout_b,
-            -- Secded decoder module
-            secded_dec_data_o       => secded_dec_data_o,
-            secded_dec_code_o       => secded_dec_code_o,
-            secded_dec_data_i       => secded_dec_data_i,
-            secded_stat_corrected_i => secded_stat_corrected_i,
-            secded_stat_detected_i  => secded_stat_detected_i,
-            secded_stat_no_error_i  => secded_stat_no_error_i,
-            -- Secded encoder module
-            secded_enc_data_o => secded_enc_data_o,
-            secded_enc_code_i => secded_enc_code_i,
-            -- status/debug passthrough
-            stat_error_det_o => stat_error_det_o,
-            stat_error_fix_o => stat_error_fix_o,
+            scrub_en_o   => scrub_en,
+            scrub_rw_o   => scrub_rw,
+            scrub_addr_o => scrub_addr,
+            scrub_data_o => scrub_wdata,
+            scrub_data_i => scrub_rdata,
+            -- Fault log
+            flog_clear_i     => flog_clear_i,
+            flog_last_addr_o => flog_last_addr_o,
+            flog_count_o     => flog_count_o,
+            flog_overflow_o  => flog_overflow_o,
+            -- Status passthrough
+            stat_corrected_o => stat_corrected_o,
+            stat_detected_o  => stat_detected_o,
             stat_state_o     => stat_state_o,
-            stat_ptr_o       => stat_ptr_o,
+            stat_addr_o      => stat_addr_o,
             stat_conflict_o  => stat_conflict_o,
             stat_busy_o      => stat_busy_o,
             stat_full_pass_o => stat_full_pass_o
         );
 
-    -- notifier
+    -- -------------------------------------------------------------------------
+    -- Synthesis info
+    -- -------------------------------------------------------------------------
     assert false report
-    "[NEORV32] Using scrubbing DMEM RAM component (" &
-    natural'image(2 ** AWIDTH) & " bytes, parity ECC on Port B)."
+    "[NEORV32] DMEM scrubbing wrapper: " &
+    natural'image(MEM_DEPTH) & " words (" &
+    natural'image(2 ** DMEM_AWIDTH) & " bytes), SECDED ECC"
     severity note;
 
-end neorv32_dmem_ram_scrub_rtl;
+end neorv32_dmem_scrub_rtl;
