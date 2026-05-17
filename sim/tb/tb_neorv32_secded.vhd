@@ -18,8 +18,10 @@
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
 entity tb_neorv32_secded is
 end entity tb_neorv32_secded;
+
 architecture sim of tb_neorv32_secded is
 
     -- Encoder signals
@@ -27,12 +29,12 @@ architecture sim of tb_neorv32_secded is
     signal secded_enc_code_o : std_ulogic_vector(6 downto 0)  := (others => '0');
 
     -- Decoder signals
-    signal secded_dec_data_i       : std_ulogic_vector(31 downto 0) := (others => '0');
-    signal secded_dec_code_i       : std_ulogic_vector(6 downto 0)  := (others => '0');
-    signal secded_dec_data_o       : std_ulogic_vector(31 downto 0) := (others => '0');
-    signal secded_stat_corrected_o : std_ulogic                     := '0';
-    signal secded_stat_detected_o  : std_ulogic                     := '0';
-    signal secded_stat_no_error_o  : std_ulogic                     := '0';
+    signal secded_dec_data_i        : std_ulogic_vector(31 downto 0) := (others => '0');
+    signal secded_dec_code_i        : std_ulogic_vector(6 downto 0)  := (others => '0');
+    signal secded_dec_data_o        : std_ulogic_vector(31 downto 0) := (others => '0');
+    signal secded_stat_corrected_o  : std_ulogic                     := '0';
+    signal secded_stat_detected_o   : std_ulogic                     := '0';
+    signal secded_stat_data_valid_o : std_ulogic                     := '0';
 
     -- Simulation control
     signal sim_done    : boolean := false;
@@ -69,22 +71,22 @@ architecture sim of tb_neorv32_secded is
 
 begin
 
-    -- DUT: Encoder
+    -- DUT: Encoder (Computes Secded code given data)
     dut_encoder : entity work.neorv32_secded_encoder
         port map(
             data_i   => secded_enc_data_i,
             secded_o => secded_enc_code_o
         );
 
-    -- DUT: Decoder 
+    -- DUT: Decoder (Checks given data and Secded code accord)
     dut_decoder : entity work.neorv32_secded_decoder
         port map(
-            data_i           => secded_dec_data_i,
-            check_i          => secded_dec_code_i,
-            data_o           => secded_dec_data_o,
-            stat_corrected_o => secded_stat_corrected_o,
-            stat_detected_o  => secded_stat_detected_o,
-            stat_no_error_o  => secded_stat_no_error_o
+            data_i            => secded_dec_data_i,
+            check_i           => secded_dec_code_i,
+            data_o            => secded_dec_data_o,
+            stat_corrected_o  => secded_stat_corrected_o,
+            stat_detected_o   => secded_stat_detected_o,
+            stat_data_valid_o => secded_stat_data_valid_o
         );
 
     -- Stimulus ---------------------------------------------------------------
@@ -95,7 +97,9 @@ begin
         variable v_errors   : natural := 0;
     begin
 
-        -- Phase 1: Clean data roundtrip =======================================
+        --------------------------------------------------------------------
+        -- Phase 1: Clean data (data should be valid)
+        --------------------------------------------------------------------
         test_phase <= 1;
         report "Phase 1: Clean data (no errors)" severity note;
 
@@ -111,7 +115,7 @@ begin
             secded_dec_code_i <= std_ulogic_vector(v_code);
             wait for T_PROP;
 
-            check(secded_stat_no_error_o = '1', "no_error should be 1 for clean word " & integer'image(idx), v_errors);
+            check(secded_stat_data_valid_o = '1', "no_error should be 1 for clean word " & integer'image(idx), v_errors);
             check(secded_stat_corrected_o = '0', "corrected should be 0 for clean word " & integer'image(idx), v_errors);
             check(secded_stat_detected_o = '0', "detected should be 0 for clean word " & integer'image(idx), v_errors);
             check(secded_dec_data_o = TEST_WORDS(idx), "data_o mismatch for clean word " & integer'image(idx), v_errors);
@@ -120,9 +124,11 @@ begin
 
         report "Phase 1 complete" severity note;
 
-        -- Phase 2: Single-bit data errors (correction) ========================
+        --------------------------------------------------------------------
+        -- Phase 2: Single bit errors on data (data should be valid)
+        --------------------------------------------------------------------
         test_phase <= 2;
-        report "Phase 2: Single-bit data errors (all 32 positions)" severity note;
+        report "Phase 2: Single bit errors on data (all 32 positions)" severity note;
 
         for idx in TEST_WORDS'range loop
 
@@ -134,17 +140,20 @@ begin
             -- Flip each data bit one at a time
             for bit_pos in 0 to 31 loop
 
+                -- Flip bit of data
                 v_bad_data          := TEST_WORDS(idx);
                 v_bad_data(bit_pos) := not v_bad_data(bit_pos);
 
+                -- Input bad data to decoder
                 secded_dec_data_i <= v_bad_data;
                 secded_dec_code_i <= std_logic_vector(v_code);
                 wait for T_PROP;
 
+                -- Check outputs
                 check(secded_stat_corrected_o = '1',
                 "corrected should be 1 for word " & integer'image(idx) &
                 " bit " & integer'image(bit_pos), v_errors);
-                check(secded_stat_no_error_o = '0',
+                check(secded_stat_data_valid_o = '0',
                 "no_error should be 0 for word " & integer'image(idx) &
                 " bit " & integer'image(bit_pos), v_errors);
                 check(secded_stat_detected_o = '0',
@@ -159,9 +168,11 @@ begin
 
         report "Phase 2 complete" severity note;
 
-        -- Phase 3: Single-bit check bit errors (no data correction needed) ====
+        --------------------------------------------------------------------
+        -- Phase 3: Single bit errors on secded code (data should be valid)
+        --------------------------------------------------------------------
         test_phase <= 3;
-        report "Phase 3: Single-bit check bit errors (all 7 positions)" severity note;
+        report "Phase 3: Single bit errors on secded code (all 7 positions)" severity note;
 
         for idx in TEST_WORDS'range loop
 
@@ -173,13 +184,16 @@ begin
             -- Flip each check bit one at a time
             for bit_pos in 0 to 6 loop
 
+                -- Flip bit of seceded
                 v_bad_code          := std_logic_vector(v_code);
                 v_bad_code(bit_pos) := not v_bad_code(bit_pos);
 
+                -- Input bad secded onto decoder
                 secded_dec_data_i <= TEST_WORDS(idx);
                 secded_dec_code_i <= v_bad_code;
                 wait for T_PROP;
 
+                -- check
                 check(secded_stat_corrected_o = '1',
                 "corrected should be 1 for check bit " & integer'image(bit_pos) &
                 " word " & integer'image(idx), v_errors);
@@ -192,9 +206,11 @@ begin
 
         report "Phase 3 complete" severity note;
 
-        -- Phase 4: Double-bit data errors (detection only) ====================
+        --------------------------------------------------------------------
+        -- Phase 4: Double bit errors on data (detectable only)
+        --------------------------------------------------------------------
         test_phase <= 4;
-        report "Phase 4: Double-bit data errors (uncorrectable)" severity note;
+        report "Phase 4: Double bit errors on data (uncorrectable)" severity note;
 
         for idx in TEST_WORDS'range loop
 
@@ -208,6 +224,7 @@ begin
 
                 v_bad_data := TEST_WORDS(idx);
 
+                -- Flip 2 bits
                 case pair is
                     when 0 => v_bad_data(0)  := not v_bad_data(0);
                         v_bad_data(1)            := not v_bad_data(1);
@@ -220,17 +237,19 @@ begin
                     when others => null;
                 end case;
 
+                -- Input to encoder
                 secded_dec_data_i <= v_bad_data;
                 secded_dec_code_i <= std_logic_vector(v_code);
                 wait for T_PROP;
 
+                -- check
                 check(secded_stat_detected_o = '1',
                 "detected should be 1 for double error word " & integer'image(idx) &
                 " pair " & integer'image(pair), v_errors);
                 check(secded_stat_corrected_o = '0',
                 "corrected should be 0 for double error word " & integer'image(idx) &
                 " pair " & integer'image(pair), v_errors);
-                check(secded_stat_no_error_o = '0',
+                check(secded_stat_data_valid_o = '0',
                 "no_error should be 0 for double error word " & integer'image(idx) &
                 " pair " & integer'image(pair), v_errors);
 
@@ -239,7 +258,9 @@ begin
 
         report "Phase 4 complete" severity note;
 
-        -- Results =============================================================
+        --------------------------------------------------------------------
+        -- Results
+        --------------------------------------------------------------------
         test_phase  <= 0;
         error_count <= v_errors;
         wait for T_PROP;

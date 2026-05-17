@@ -33,6 +33,8 @@ vmap work work
 
 echo "Compiling RTL..."
 
+vcom -2008 ../../rtl/seu/neorv32_secded_encoder.vhd
+vcom -2008 ../../rtl/seu/neorv32_secded_decoder.vhd
 vcom -2008 ../../rtl/seu/neorv32_scrub_fsm.vhd
 
 

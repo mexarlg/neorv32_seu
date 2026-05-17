@@ -15,7 +15,7 @@ quietly WaveActivateNextPane {} 0
 # Simulation
 #===========================================================================
 add wave -divider " Test "
-add wave -color white  -radix binary sim:/tb_neorv32_secded/test_phase
+add wave -color white  -radix unsigned sim:/tb_neorv32_secded/test_phase
 add wave -color white  -radix binary sim:/tb_neorv32_secded/sim_done
 
 #===========================================================================

@@ -22,15 +22,15 @@ use ieee.std_logic_1164.all;
 
 entity neorv32_secded_decoder is
     port (
-        -- Inputs from read channel
+        -- Inputs to check (decode)
         data_i  : in std_ulogic_vector(31 downto 0);
         check_i : in std_ulogic_vector(6 downto 0);
-        -- Output data
+        -- Output corrected data
         data_o : out std_ulogic_vector(31 downto 0);
         -- Status of correction
-        stat_corrected_o : out std_ulogic;
-        stat_detected_o  : out std_ulogic;
-        stat_no_error_o  : out std_ulogic
+        stat_corrected_o  : out std_ulogic;
+        stat_detected_o   : out std_ulogic;
+        stat_data_valid_o : out std_ulogic
     );
 end entity neorv32_secded_decoder;
 
@@ -117,13 +117,13 @@ begin
         variable data_fixed : std_ulogic_vector(31 downto 0);
     begin
         data_fixed := data_i;
-        stat_no_error_o  <= '0';
-        stat_corrected_o <= '0';
-        stat_detected_o  <= '0';
+        stat_data_valid_o <= '0';
+        stat_corrected_o  <= '0';
+        stat_detected_o   <= '0';
 
         if syndrome = "0000000" then
             -- syndrome match, data valid
-            stat_no_error_o <= '1';
+            stat_data_valid_o <= '1';
 
         elsif parity_all = '1' then
             -- syndrome mismatch, parity changed once, error fixable
@@ -135,7 +135,7 @@ begin
             stat_corrected_o <= '1';
 
         else
-            -- syndrome mismatch, parity changed twice, error detectable
+            -- syndrome mismatch and parity changed twice, error detected but data is not valid
             stat_detected_o <= '1';
 
         end if;

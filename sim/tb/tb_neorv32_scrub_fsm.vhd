@@ -1,9 +1,9 @@
---------------------------------------------------------------------------------------
--- Testbench: tb_neorv32_scrub_fsm.vhd
--- Author: Aldo Lupio
--- DUT: neorv32_scrub_fsm
--- Description: Tests the scrubber fsm interactions with cpu ram transaction stimulus
---------------------------------------------------------------------------------------
+-- -------------------------------------------------------------------------------- --
+-- Testbench   : tb_neorv32_scrub_fsm                                                --
+-- Author      : Aldo Lupio                                                          --
+-- DUT         : neorv32_scrub_fsm                                                   --
+-- Description : Tests scrubber FSM with SECDED, byte addressing, and fault log      --
+-- -------------------------------------------------------------------------------- --
 
 library ieee;
 use ieee.std_logic_1164.all;
@@ -15,143 +15,130 @@ end entity;
 architecture sim of tb_neorv32_scrub_fsm is
 
     -- Memory configuration
-    constant AWIDTH    : natural := 5; -- 32 bytes
-    constant MEM_DEPTH : natural := 8; -- 32b / 4
+    constant DMEM_AWIDTH : natural := 5; -- 5-bit byte address (32 bytes)
+    constant DMEM_DEPTH  : natural := 8; -- 8 words of 32 bits
 
-    -- clock, reset, scrub and cpu secded enable
-    signal clk        : std_ulogic := '0';
-    signal rstn       : std_ulogic := '0';
-    signal scrub_en   : std_ulogic := '0';
-    signal cpu_ecc_en : std_ulogic := '0';
+    -- Global control
+    signal clk      : std_ulogic := '0';
+    signal rstn     : std_ulogic := '0';
+    signal scrub_en : std_ulogic := '0';
 
-    -- Port A (CPU) memory interface
-    signal cpu_en           : std_ulogic_vector(3 downto 0)  := "0000";
-    signal cpu_rw           : std_ulogic                     := '0';
-    signal cpu_addr         : std_ulogic_vector(31 downto 0) := (others => '0');
-    signal cpu_data_written : std_ulogic_vector(31 downto 0) := (others => '0');
-    signal cpu_data_read    : std_ulogic_vector(31 downto 0) := (others => '0');
+    -- CPU write monitoring
+    signal cpu_ben     : std_ulogic_vector(3 downto 0)               := "0000";
+    signal cpu_rw      : std_ulogic                                  := '0';
+    signal cpu_addr    : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0) := (others => '0');
+    signal cpu_data_wr : std_ulogic_vector(31 downto 0)              := (others => '0');
+    signal cpu_data_rd : std_ulogic_vector(31 downto 0)              := (others => '0');
 
-    -- Port B (Scrubber) memory interface
-    signal mem_en_b       : std_ulogic;
-    signal mem_rw_b       : std_ulogic;
-    signal mem_addr_b     : std_ulogic_vector(AWIDTH - 3 downto 0);
-    signal mem_data_b_out : std_ulogic_vector(31 downto 0);
-    signal mem_data_b_in  : std_ulogic_vector(31 downto 0) := (others => '0');
+    -- DMEM port B (scrubber)
+    signal scrub_en_b   : std_ulogic;
+    signal scrub_rw_b   : std_ulogic;
+    signal scrub_addr_b : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    signal scrub_data_o : std_ulogic_vector(31 downto 0);
+    signal scrub_data_i : std_ulogic_vector(31 downto 0) := (others => '0');
 
-    -- Secded signals
-    signal secded_dec_data_o       : std_ulogic_vector(31 downto 0); -- Data to be checked
-    signal secded_dec_code_o       : std_logic_vector(6 downto 0);   -- Secded to be checked
-    signal secded_dec_data_i       : std_ulogic_vector(31 downto 0); -- Data fixed
-    signal secded_stat_corrected_i : std_ulogic;                     -- 1 Bit error fixed
-    signal secded_stat_detected_i  : std_ulogic;                     -- 2 Bit error deteced
-    signal secded_stat_no_error_i  : std_ulogic;                     -- Data / Code valid
+    -- Fault log
+    signal flog_clear     : std_ulogic := '0';
+    signal flog_last_addr : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    signal flog_count     : std_ulogic_vector(7 downto 0);
+    signal flog_overflow  : std_ulogic;
 
-    -- Secded encoder module
-    signal secded_enc_data_o : std_ulogic_vector(31 downto 0); -- Data for secded computation
-    signal secded_enc_code_i : std_ulogic_vector(6 downto 0);  -- Secded computed from data
+    -- Status
+    signal stat_data_valid : std_ulogic;
+    signal stat_corrected  : std_ulogic;
+    signal stat_detected   : std_ulogic;
+    signal stat_state      : std_ulogic_vector(2 downto 0);
+    signal stat_addr       : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    signal stat_conflict   : std_ulogic;
+    signal stat_busy       : std_ulogic;
+    signal stat_full_pass  : std_ulogic;
 
-    -- status signals
-    signal stat_error_det : std_ulogic;
-    signal stat_error_fix : std_ulogic;
-    signal stat_state     : std_ulogic_vector(2 downto 0);
-    signal stat_ptr       : std_ulogic_vector(AWIDTH - 3 downto 0);
-    signal stat_conflict  : std_ulogic;
-    signal stat_busy      : std_ulogic;
-    signal stat_full_pass : std_ulogic;
-
-    -- simulation helpers
+    -- Simulation control
     signal sim_done   : boolean := false;
     signal test_phase : natural := 0;
 
-    -- simulated dpram memory
-    type mem_t is array (0 to MEM_DEPTH - 1) of std_ulogic_vector(31 downto 0);
+    -- Simulated dual-port RAM
+    type mem_t is array (0 to DMEM_DEPTH - 1) of std_ulogic_vector(31 downto 0);
     shared variable fake_mem : mem_t := (others => x"00000000");
 
 begin
 
-    ----------------------------------------------------------------------------
-    -- Clock generation - 125 MHz
-    ----------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------
+    -- Clock generation (125 MHz)
+    -- -------------------------------------------------------------------------
     clk <= not clk after 4 ns when not sim_done else
         '0';
 
-    ----------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------
     -- DUT
-    ----------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------
     dut : entity work.neorv32_scrub_fsm
         generic map(
-            AWIDTH    => AWIDTH,
-            MEM_DEPTH => MEM_DEPTH
+            DMEM_AWIDTH => DMEM_AWIDTH,
+            DMEM_DEPTH  => DMEM_DEPTH
         )
         port map(
-            -- clk, rst, config
-            clk_i       => clk,
-            rstn_i      => rstn,
-            scrubber_en => scrub_en,
-            cpu_ecc_en  => cpu_ecc_en,
-            -- cpu port A
-            cpu_en_i   => cpu_en,
-            cpu_rw_i   => cpu_rw,
-            cpu_addr_i => cpu_addr,
-            cpu_data_i => cpu_data_written,
-            -- scrubber port B
-            mem_en_b_o   => mem_en_b,
-            mem_rw_b_o   => mem_rw_b,
-            mem_addr_b_o => mem_addr_b,
-            mem_data_b_o => mem_data_b_out,
-            mem_data_b_i => mem_data_b_in,
-            -- Secded decoder module
-            secded_dec_data_o       => secded_dec_data_o,
-            secded_dec_code_o       => secded_dec_code_o,
-            secded_dec_data_i       => secded_dec_data_i,
-            secded_stat_corrected_i => secded_stat_corrected_i,
-            secded_stat_detected_i  => secded_stat_detected_i,
-            secded_stat_no_error_i  => secded_stat_no_error_i,
-            -- Secded encoder module
-            secded_enc_data_o => secded_enc_data_o,
-            secded_enc_code_i => secded_enc_code_i,
-            -- Scrubber status          
-            stat_error_det_o => stat_error_det,
-            stat_error_fix_o => stat_error_fix,
-            stat_state_o     => stat_state,
-            stat_ptr_o       => stat_ptr,
-            stat_conflict_o  => stat_conflict,
-            stat_busy_o      => stat_busy,
-            stat_full_pass_o => stat_full_pass
+            clk_i             => clk,
+            rstn_i            => rstn,
+            scrub_en_i        => scrub_en,
+            cpu_ben_i         => cpu_ben,
+            cpu_rw_i          => cpu_rw,
+            cpu_addr_i        => cpu_addr,
+            cpu_data_i        => cpu_data_wr,
+            scrub_en_o        => scrub_en_b,
+            scrub_rw_o        => scrub_rw_b,
+            scrub_addr_o      => scrub_addr_b,
+            scrub_data_o      => scrub_data_o,
+            scrub_data_i      => scrub_data_i,
+            flog_clear_i      => flog_clear,
+            flog_last_addr_o  => flog_last_addr,
+            flog_count_o      => flog_count,
+            flog_overflow_o   => flog_overflow,
+            stat_data_valid_o => stat_data_valid,
+            stat_corrected_o  => stat_corrected,
+            stat_detected_o   => stat_detected,
+            stat_state_o      => stat_state,
+            stat_addr_o       => stat_addr,
+            stat_conflict_o   => stat_conflict,
+            stat_busy_o       => stat_busy,
+            stat_full_pass_o  => stat_full_pass
         );
 
-    ----------------------------------------------------------------------------
-    -- Simulated Dual Port RAM ? responds to Port B and CPU Port A
-    ----------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------
+    -- Simulated dual-port RAM (port A for CPU, port B for scrubber)
+    -- Addresses are byte addresses, word index = addr / 4
+    -- -------------------------------------------------------------------------
     p_fake_mem : process (clk)
-        variable addr : natural;
+        variable idx : natural;
     begin
         if rising_edge(clk) then
-            if (cpu_en = "1111") then
-                addr := to_integer(unsigned(cpu_addr));
+            -- Port A (CPU)
+            if (cpu_ben = "1111") then
+                idx := to_integer(unsigned(cpu_addr(DMEM_AWIDTH - 1 downto 2)));
                 if (cpu_rw = '1') then
-                    fake_mem(addr) := cpu_data_written;
+                    fake_mem(idx) := cpu_data_wr;
                 else
-                    cpu_data_read <= fake_mem(addr);
+                    cpu_data_rd <= fake_mem(idx);
                 end if;
             end if;
-            if (mem_en_b = '1') then
-                addr := to_integer(unsigned(mem_addr_b));
-                if (mem_rw_b = '1') then
-                    fake_mem(addr) := mem_data_b_out;
+            -- Port B (Scrubber)
+            if (scrub_en_b = '1') then
+                idx := to_integer(unsigned(scrub_addr_b(DMEM_AWIDTH - 1 downto 2)));
+                if (scrub_rw_b = '1') then
+                    fake_mem(idx) := scrub_data_o;
                 else
-                    mem_data_b_in <= fake_mem(addr);
+                    scrub_data_i <= fake_mem(idx);
                 end if;
             end if;
         end if;
     end process p_fake_mem;
 
-    ----------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------
     -- Stimulus
-    ----------------------------------------------------------------------------
+    -- -------------------------------------------------------------------------
     p_stim : process
 
-        -- helper: wait N clock cycles
+        -- Wait N clock cycles
         procedure wait_clk(n : natural) is
         begin
             for i in 1 to n loop
@@ -159,55 +146,62 @@ begin
             end loop;
         end procedure;
 
-        -- helper: simulate a 1 cycle CPU write transaction
-        procedure cpu_write(word_addr : natural; data : std_ulogic_vector(31 downto 0)) is
+        -- Simulate a 1-cycle CPU write using byte address
+        procedure cpu_write(word_idx : natural; data : std_ulogic_vector(31 downto 0)) is
         begin
-            cpu_en           <= "1111";
-            cpu_rw           <= '1';
-            cpu_addr         <= std_ulogic_vector(to_unsigned(word_addr, 32));
-            cpu_data_written <= data;
+            cpu_ben     <= "1111";
+            cpu_rw      <= '1';
+            cpu_addr    <= std_ulogic_vector(to_unsigned(word_idx * 4, DMEM_AWIDTH));
+            cpu_data_wr <= data;
             wait until rising_edge(clk);
-            cpu_en           <= "0000";
-            cpu_rw           <= '0';
-            cpu_addr         <= (others => '0');
-            cpu_data_written <= (others => '0');
+            cpu_ben     <= "0000";
+            cpu_rw      <= '0';
+            cpu_addr    <= (others => '0');
+            cpu_data_wr <= (others => '0');
         end procedure;
 
-        -- helper: inject SEU by flipping one bit given addr and bit position
-        procedure inject_seu(word_addr : natural; bit_pos : natural) is
+        -- Inject SEU by flipping a bit directly in fake_mem
+        procedure inject_seu(word_idx : natural; bit_pos : natural) is
         begin
-            fake_mem(word_addr)(bit_pos) := not fake_mem(word_addr)(bit_pos);
+            fake_mem(word_idx)(bit_pos) := not fake_mem(word_idx)(bit_pos);
         end procedure;
 
-        -- helper: overwrite a word in simulated memory
-        procedure mem_set(word_addr : natural; data : std_ulogic_vector(31 downto 0)) is
+        -- Inject double-bit error
+        procedure inject_dbu(word_idx : natural; bit_a : natural; bit_b : natural) is
         begin
-            fake_mem(word_addr) := data;
+            fake_mem(word_idx)(bit_a) := not fake_mem(word_idx)(bit_a);
+            fake_mem(word_idx)(bit_b) := not fake_mem(word_idx)(bit_b);
         end procedure;
 
-        -- helper: wait for scrubber to reach a specific address in S_READ
-        procedure wait_scrub_read(addr : natural) is
+        -- Preload a word in fake_mem
+        procedure mem_set(word_idx : natural; data : std_ulogic_vector(31 downto 0)) is
+        begin
+            fake_mem(word_idx) := data;
+        end procedure;
+
+        -- Wait for scrubber to reach a word index in S_READ
+        procedure wait_scrub_read(word_idx : natural) is
         begin
             loop
                 wait until rising_edge(clk);
-                exit when (to_integer(unsigned(stat_ptr)) = addr) and (stat_state = "001");
+                exit when (to_integer(unsigned(stat_addr(DMEM_AWIDTH - 1 downto 2))) = word_idx)
+                and (stat_state = "001");
             end loop;
         end procedure;
 
-        -- helper: wait for scrubber to reach a specific address in S_CHECK
-        procedure wait_scrub_check(addr : natural) is
+        -- Wait for scrubber to reach a word index in S_CHECK
+        procedure wait_scrub_check(word_idx : natural) is
         begin
             loop
                 wait until rising_edge(clk);
-                exit when (to_integer(unsigned(stat_ptr)) = addr) and (stat_state = "010");
+                exit when (to_integer(unsigned(stat_addr(DMEM_AWIDTH - 1 downto 2))) = word_idx)
+                and (stat_state = "010");
             end loop;
         end procedure;
 
     begin
 
-        --------------------------------------------------------------------
-        -- Phase 1: Reset
-        --------------------------------------------------------------------
+        -- Phase 1: Reset. ok
         test_phase <= 1;
         report "Phase 1: Reset" severity note;
 
@@ -221,151 +215,155 @@ begin
         assert stat_busy = '0'
         report "FAIL: busy should be low in S_IDLE" severity error;
 
-        --------------------------------------------------------------------
-        -- Phase 2: Preload memory with known data
-        --------------------------------------------------------------------
+        -- Phase 2: Preload memory with known data. ok
         test_phase <= 2;
         report "Phase 2: Preload memory" severity note;
 
-        for i in 0 to MEM_DEPTH - 1 loop
-            mem_set(i, std_ulogic_vector(to_unsigned(i * 111, 32)));
+        for i in 0 to DMEM_DEPTH - 1 loop
+            wait_clk(1);
+            cpu_write(i, std_ulogic_vector(to_unsigned(i * 111, 32)));
         end loop;
         wait_clk(1);
 
-        --------------------------------------------------------------------
-        -- Phase 3: Enable scrubber: verify basic operation
-        --------------------------------------------------------------------
+        -- Phase 3: Enable scrubber, wait for first full pass. ok (stat signals valid on check, same as dec)
         test_phase <= 3;
         report "Phase 3: Enable scrubber" severity note;
 
-        scrub_en   <= '1';
-        cpu_ecc_en <= '1';
+        scrub_en <= '1';
         wait_clk(1);
 
-        assert stat_busy = '1'
-        report "FAIL: busy should be high after enable" severity error;
+        loop
+            wait until rising_edge(clk);
+            exit when stat_full_pass = '1';
+        end loop;
 
-        -- wait for first full pass to build ECC store
-        wait until stat_full_pass = '1';
         report "First full pass completed: ECC store initialised" severity note;
         wait_clk(5);
 
-        --------------------------------------------------------------------
-        -- Phase 4: SEU injection, verify detection
-        --------------------------------------------------------------------
+        -- Phase 4: Single bit SEU on data addr = 3, verify correction
         test_phase <= 4;
-        report "Phase 4: SEU injection at addr 3" severity note;
+        report "Phase 4: Single bit SEU at word 3, bit 0" severity note;
 
         inject_seu(3, 0);
 
-        -- wait for scrubber to reach addr 3 and detect the error
-        wait until stat_error_det = '1';
-        report "SEU detected" severity note;
+        loop
+            wait until rising_edge(clk);
+            exit when stat_corrected = '1';
+        end loop;
+        report "Single bit error corrected" severity note;
+
+        -- make sure the seu is fixed and not logged on the fault log
+        assert flog_count = x"00"
+        report "FAIL: fault log count should be 0 after correction" severity error;
         wait_clk(5);
 
-        --------------------------------------------------------------------
-        -- Phase 5: CPU write to different address, no conflict expected
-        --------------------------------------------------------------------
+        -- Phase 5: Double bit error, verify detection and fault log. ok
         test_phase <= 5;
-        report "Phase 5: CPU write different address" severity note;
+        report "Phase 5: Double bit error at word 1, bits 0 and 1" severity note;
 
-        -- wait for scrubber to be in addr 1
+        inject_dbu(1, 0, 1);
+
+        loop
+            wait until rising_edge(clk);
+            exit when stat_detected = '1';
+        end loop;
+        wait_clk(1);
+
+        report "Fault log: count=" & integer'image(to_integer(unsigned(flog_count)))
+            & " addr=" & integer'image(to_integer(unsigned(flog_last_addr)))
+            severity note;
+        wait_clk(5);
+
+        -- Phase 6: Fault log clear
+        test_phase <= 6;
+        report "Phase 6: Clear fault log" severity note;
+
+        flog_clear <= '1';
+        wait_clk(1);
+        flog_clear <= '0';
+        wait_clk(1);
+
+        assert flog_count = x"00"
+        report "FAIL: fault log count should be 0 after clear" severity error;
+        assert flog_overflow = '0'
+        report "FAIL: overflow should be 0 after clear" severity error;
+        wait_clk(5);
+
+        -- Phase 7: CPU write to different address, no conflict expected
+        test_phase <= 7;
+        report "Phase 7: CPU write different address" severity note;
+
         wait_scrub_read(1);
-
-        -- write to addr 3 while scrubber is at addr 1, no conflict
         cpu_write(3, std_ulogic_vector(to_unsigned(11, 32)));
         wait_clk(1);
 
         assert stat_conflict = '0'
         report "FAIL: unexpected conflict on different address" severity error;
 
-        -- let scrubber pass over addr 3 ? verify no false error
         wait_scrub_check(3);
         wait_clk(1);
 
-        assert stat_error_det = '0'
-        report "FAIL: false error after CPU write" severity error;
-        report "CPU write to different address: no conflict, parity correct" severity note;
+        assert stat_corrected = '0'
+        report "FAIL: false correction after CPU write" severity error;
+        report "CPU write to different address: no conflict" severity note;
         wait_clk(5);
 
-        --------------------------------------------------------------------
-        -- Phase 6: CPU issues write, conflict during S_READ
-        --------------------------------------------------------------------
-        test_phase <= 6;
-        report "Phase 6: CPU write conflict in S_READ" severity note;
+        -- Phase 8: CPU write conflict in S_READ
+        test_phase <= 8;
+        report "Phase 8: CPU write conflict in S_READ" severity note;
 
-        -- inject SEU at addr 5 so scrubber will detect an error there
         inject_seu(5, 0);
-
-        -- wait for scrubber to be in S_CHECK of addr 4
         wait_scrub_check(4);
-
-        -- issue CPU write to addr 5, 1 cycle after
         cpu_write(5, std_ulogic_vector(to_unsigned(10, 32)));
-
-        -- scrubber should have stalled and re-read addr 5
         wait_clk(5);
         report "S_READ conflict test complete" severity note;
 
-        --------------------------------------------------------------------
-        -- Phase 7: CPU issues write, conflict during S_CHECK
-        --------------------------------------------------------------------
-        test_phase <= 7;
-        report "Phase 7: CPU write conflict in S_CHECK" severity note;
+        -- Phase 9: CPU write conflict in S_CHECK
+        test_phase <= 9;
+        report "Phase 9: CPU write conflict in S_CHECK" severity note;
 
-        -- inject SEU at addr 6 so scrubber will detect an error there
         inject_seu(6, 0);
-
-        -- wait for scrubber to enter S_READ for addr 6
         wait_scrub_read(6);
-
-        -- issue CPU write to addr 6, 1 cycle after
         cpu_write(6, std_ulogic_vector(to_unsigned(22, 32)));
-
-        -- scrubber should discard stale data and re-read
         wait_clk(5);
         report "S_CHECK conflict test complete" severity note;
 
-        --------------------------------------------------------------------
-        -- Phase 8: CPU issues write, conflict during S_WRITE
-        --------------------------------------------------------------------
-        test_phase <= 8;
-        -- ecc automatically updated by cpu disable, scrubber should detect and fix
-        cpu_ecc_en <= '0';
-        report "Phase 8: CPU write conflict in S_WRITE" severity note;
+        -- Phase 10: CPU write conflict in S_WRITE
+        test_phase <= 10;
+        report "Phase 10: CPU write conflict in S_WRITE" severity note;
 
-        -- inject SEU at addr 7 to force scrubber into S_WRITE
         inject_seu(7, 0);
-
-        -- wait for scrubber to detect the error
         wait_scrub_check(7);
-
-        -- now the FSM is about to enter S_WRITE, issue write 1 cycle after
         cpu_write(7, std_ulogic_vector(to_unsigned(8, 32)));
-
-        -- parity should have changed from 0 to 1 by scrubber
-
-        -- scrubber should abort correction, CPU write takes priority
         wait_clk(5);
         report "S_WRITE conflict test complete" severity note;
 
-        --------------------------------------------------------------------
-        -- Phase 9: Final full pass, verify no errors remain
-        --------------------------------------------------------------------
-        test_phase <= 9;
-        report "Phase 9: Final clean pass" severity note;
+        -- Phase 11: Final pass (still a multibit on position 1)
+        test_phase <= 11;
 
+        cpu_write(5, std_ulogic_vector(to_unsigned(3, 32)));
+        wait_scrub_read(4);
+
+        report "Phase 11: Final clean pass" severity note;
         wait until stat_full_pass = '1';
-
         report "Final pass completed" severity note;
         wait_clk(10);
 
-        --------------------------------------------------------------------
-        -- Simulation completed
-        --------------------------------------------------------------------
+        -- Notes of testing: 
+
+        -- The secded code should have another way of protection as the scrubber relies on it being correct
+
+        -- Also, the scrubber state output signals are not registered, which might have combinatorial glitches
+        -- Some of the status signals of the encoder/decoder are erroneous on some transition states, 
+        -- but are only checked by the scrubber on the check state (when their result is valid)
+
+        -- The fault log will continue to increase the count after it has passed a full revolution,
+        -- which increases the count although the existing error is the same
+
+        -- Done
         test_phase <= 0;
         report "========================================" severity note;
-        report "All tests completed successfully" severity note;
+        report "All tests completed" severity note;
         report "========================================" severity note;
         sim_done <= true;
         wait;
