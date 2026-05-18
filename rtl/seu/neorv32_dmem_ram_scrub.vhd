@@ -23,7 +23,9 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
-entity neorv32_dmem_scrub is
+library neorv32;
+
+entity neorv32_dmem_ram_scrub is
     generic (
         DMEM_AWIDTH : natural; -- byte address width
         DMEM_OUTREG : boolean  -- add output register stage on Port A reads
@@ -44,7 +46,7 @@ entity neorv32_dmem_scrub is
         -- Fault log (software readable)
         flog_clear_i     : in std_ulogic;
         flog_last_addr_o : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-        flog_count_o     : out std_ulogic_vector(2 downto 0);
+        flog_count_o     : out std_ulogic_vector(7 downto 0);
         flog_overflow_o  : out std_ulogic;
 
         -- Scrubber status
@@ -57,9 +59,44 @@ entity neorv32_dmem_scrub is
         stat_busy_o       : out std_ulogic;
         stat_full_pass_o  : out std_ulogic
     );
-end neorv32_dmem_scrub;
+end neorv32_dmem_ram_scrub;
 
-architecture neorv32_dmem_scrub_rtl of neorv32_dmem_scrub is
+architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
+
+    -- -------------------------------------------------------------------------
+    -- Components declaration
+    -- -------------------------------------------------------------------------
+    --component neorv32_scrub_fsm
+    --    generic (
+    --        DMEM_AWIDTH : natural;
+    --        DMEM_DEPTH  : natural
+    --    );
+    --    port (
+    --        clk_i            : in std_ulogic;
+    --        rstn_i           : in std_ulogic;
+    --        scrub_en_i       : in std_ulogic;
+    --        cpu_ben_i        : in std_ulogic_vector(3 downto 0);
+    --        cpu_rw_i         : in std_ulogic;
+    --        cpu_addr_i       : in std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    --        cpu_data_i       : in std_ulogic_vector(31 downto 0);
+    --        scrub_en_o       : out std_ulogic;
+    --        scrub_rw_o       : out std_ulogic;
+    --        scrub_addr_o     : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    --        scrub_data_o     : out std_ulogic_vector(31 downto 0);
+    --        scrub_data_i     : in std_ulogic_vector(31 downto 0);
+    --        flog_clear_i     : in std_ulogic;
+    --        flog_last_addr_o : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    --        flog_count_o     : out std_ulogic_vector(7 downto 0);
+    --        flog_overflow_o  : out std_ulogic;
+    --        stat_corrected_o : out std_ulogic;
+    --        stat_detected_o  : out std_ulogic;
+    --        stat_state_o     : out std_ulogic_vector(2 downto 0);
+    --        stat_addr_o      : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    --        stat_conflict_o  : out std_ulogic;
+    --        stat_busy_o      : out std_ulogic;
+    --        stat_full_pass_o : out std_ulogic
+    --    );
+    --end component;
 
     -- -------------------------------------------------------------------------
     -- Memory configuration
@@ -108,39 +145,25 @@ begin
     -- Port B: Scrubber (always full word, gated by scrub_en)
     -- -------------------------------------------------------------------------
     gen_byte_ram : for i in 0 to 3 generate
-
-        signal ram : std_ulogic_vector(7 downto 0);
-
-        -- Per-byte-lane RAM array
-        type ram_t is array (0 to MEM_DEPTH - 1) of std_ulogic_vector(7 downto 0);
-        signal mem : ram_t := (others => (others => '0'));
-
-    begin
-
-        -- Port A: CPU access
-        p_port_a : process (clk_i)
-        begin
-            if rising_edge(clk_i) then
-                if (cpu_ben_i(i) = '1') and (cpu_rw_i = '1') then
-                    mem(to_integer(unsigned(addr_a))) <= cpu_data_i(i * 8 + 7 downto i * 8);
-                end if;
-                mem_a_rdata(i * 8 + 7 downto i * 8) <= mem(to_integer(unsigned(addr_a)));
-            end if;
-        end process p_port_a;
-
-        -- Port B: Scrubber access
-        p_port_b : process (clk_i)
-        begin
-            if rising_edge(clk_i) then
-                if (scrub_en = '1') then
-                    if (scrub_rw = '1') then
-                        mem(to_integer(unsigned(addr_b))) <= scrub_wdata(i * 8 + 7 downto i * 8);
-                    end if;
-                    scrub_rdata(i * 8 + 7 downto i * 8) <= mem(to_integer(unsigned(addr_b)));
-                end if;
-            end if;
-        end process p_port_b;
-
+        ram_inst : entity neorv32.neorv32_prim_dpram
+            generic map(
+                AWIDTH => DMEM_AWIDTH - 2,
+                DWIDTH => 8,
+                OUTREG => DMEM_OUTREG
+            )
+            port map(
+                clk_i    => clk_i,
+                en_a_i   => cpu_ben_i(i),
+                rw_a_i   => cpu_rw_i,
+                addr_a_i => addr_a,
+                data_a_i => cpu_data_i(i * 8 + 7 downto i * 8),
+                data_a_o => cpu_data_o(i * 8 + 7 downto i * 8),
+                en_b_i   => scrub_en,
+                rw_b_i   => scrub_rw,
+                addr_b_i => addr_b,
+                data_b_i => scrub_wdata(i * 8 + 7 downto i * 8),
+                data_b_o => scrub_rdata(i * 8 + 7 downto i * 8)
+            );
     end generate gen_byte_ram;
 
     -- -------------------------------------------------------------------------
@@ -163,7 +186,7 @@ begin
     -- -------------------------------------------------------------------------
     -- Scrubber FSM: drives Port B, observes Port A
     -- -------------------------------------------------------------------------
-    u_scrub_fsm : entity work.neorv32_scrub_fsm
+    u_scrub_fsm : entity neorv32.neorv32_scrub_fsm
         generic map(
             DMEM_AWIDTH => DMEM_AWIDTH,
             DMEM_DEPTH  => MEM_DEPTH
@@ -208,4 +231,4 @@ begin
     natural'image(2 ** DMEM_AWIDTH) & " bytes), SECDED ECC"
     severity note;
 
-end neorv32_dmem_scrub_rtl;
+end neorv32_dmem_ram_scrub_rtl;

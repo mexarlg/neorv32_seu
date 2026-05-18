@@ -116,7 +116,7 @@ entity neorv32_prim_dpram is
   generic (
     AWIDTH : natural; -- address width (number of bits)
     DWIDTH : natural; -- data width (number of bits)
-    OUTREG : natural  -- add output register stage when 1
+    OUTREG : boolean  -- add output register stage when 1
   );
   port (
     -- global control --
@@ -186,7 +186,7 @@ begin
   -- Output Register Port A --------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
   output_register_a_enabled :
-  if (OUTREG = 1) generate
+  if (OUTREG) generate
     read_outreg_a : process (clk_i)
     begin
       if rising_edge(clk_i) then
@@ -196,14 +196,14 @@ begin
   end generate;
 
   output_register_a_disabled :
-  if (OUTREG = 0) generate
+  if (not OUTREG) generate
     data_a_o <= rdata_a;
   end generate;
 
   -- Output Register Port B --------------------------------------------------------------------
   -- -------------------------------------------------------------------------------------------
   output_register_b_enabled :
-  if (OUTREG = 1) generate
+  if (OUTREG) generate
     read_outreg_b : process (clk_i)
     begin
       if rising_edge(clk_i) then
@@ -213,7 +213,7 @@ begin
   end generate;
 
   output_register_b_disabled :
-  if (OUTREG = 0) generate
+  if (not OUTREG) generate
     data_b_o <= rdata_b;
   end generate;
 end neorv32_prim_dpram_rtl;

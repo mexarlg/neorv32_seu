@@ -23,6 +23,8 @@ library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
 
+library neorv32;
+
 entity neorv32_scrub_fsm is
     generic (
         DMEM_AWIDTH : natural; -- byte address width of DMEM
@@ -66,6 +68,27 @@ entity neorv32_scrub_fsm is
 end neorv32_scrub_fsm;
 
 architecture neorv32_scrub_fsm_rtl of neorv32_scrub_fsm is
+
+    -- -------------------------------------------------------------------------
+    -- Components declaration
+    -- -------------------------------------------------------------------------
+    --component neorv32_secded_encoder
+    --    port (
+    --        data_i   : in std_ulogic_vector(31 downto 0);
+    --        secded_o : out std_ulogic_vector(6 downto 0)
+    --    );
+    --end component;
+
+    --component neorv32_secded_decoder
+    --    port (
+    --        data_i            : in std_ulogic_vector(31 downto 0);
+    --        check_i           : in std_ulogic_vector(6 downto 0);
+    --        data_o            : out std_ulogic_vector(31 downto 0);
+    --        stat_corrected_o  : out std_ulogic;
+    --        stat_detected_o   : out std_ulogic;
+    --        stat_data_valid_o : out std_ulogic
+    --    );
+    --end component;
 
     -- -------------------------------------------------------------------------
     -- Constants
@@ -132,14 +155,14 @@ begin
     -- -------------------------------------------------------------------------
 
     -- CPU encoder: computes check bits for CPU write data
-    u_cpu_encoder : entity work.neorv32_secded_encoder
+    u_cpu_encoder : entity neorv32.neorv32_secded_encoder
         port map(
             data_i   => cpu_data_i,
             secded_o => cpu_enc_code
         );
 
     -- Scrubber decoder: checks read data against stored code
-    u_scrub_decoder : entity work.neorv32_secded_decoder
+    u_scrub_decoder : entity neorv32.neorv32_secded_decoder
         port map(
             data_i            => scrub_data_i,
             check_i           => ecc_stored_code,
@@ -150,7 +173,7 @@ begin
         );
 
     -- Scrubber encoder: recomputes code from corrected data for write-back
-    u_scrub_encoder : entity work.neorv32_secded_encoder
+    u_scrub_encoder : entity neorv32.neorv32_secded_encoder
         port map(
             data_i   => dec_data_out,
             secded_o => scrub_enc_code
