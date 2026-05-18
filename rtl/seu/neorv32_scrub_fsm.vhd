@@ -113,10 +113,11 @@ architecture neorv32_scrub_fsm_rtl of neorv32_scrub_fsm is
     -- -------------------------------------------------------------------------
     -- ECC code store
     -- -------------------------------------------------------------------------
-    type ecc_store_t is array (0 to DMEM_DEPTH - 1) of std_ulogic_vector(6 downto 0);
+    type ecc_store_t is array (0 to DMEM_DEPTH - 1) of std_ulogic_vector(7 downto 0);
     signal ecc_store       : ecc_store_t := (others => (others => '0'));
     signal ecc_stored_code : std_ulogic_vector(6 downto 0);
     signal ecc_scrub_wr    : std_ulogic;
+    signal ecc_rdata_a     : std_ulogic_vector(7 downto 0);
 
     -- -------------------------------------------------------------------------
     -- CPU write path
@@ -180,7 +181,7 @@ begin
         );
 
     -- -------------------------------------------------------------------------
-    -- Address handling
+    -- Address handling and static wiring
     -- -------------------------------------------------------------------------
 
     -- From word addr (scrub_ptr) to byte addr (external)
@@ -189,14 +190,34 @@ begin
     stat_addr_o     <= scrub_byte_addr;
 
     -- From byte addr to word addr
-    cpu_wr_word <= unsigned(cpu_addr_i(WORD_ADDR_MSB downto WORD_ADDR_LSB));
+    cpu_wr_word  <= unsigned(cpu_addr_i(WORD_ADDR_MSB downto WORD_ADDR_LSB));
+    scrub_data_o <= dec_data_out;
 
     -- -------------------------------------------------------------------------
-    -- Datapath wiring
+    -- ECC Secded 8 bit RAM storage (to avoid timing violations, SECDED is 7 bit)
     -- -------------------------------------------------------------------------
 
-    ecc_stored_code <= ecc_store(to_integer(scrub_ptr));
-    scrub_data_o    <= dec_data_out;
+    -- Port A: CPU write
+    process (clk_i)
+    begin
+        if rising_edge(clk_i) then
+            if (cpu_wr_active = '1') then
+                ecc_store(to_integer(cpu_wr_word)) <= '0' & cpu_enc_code;
+            end if;
+            ecc_rdata_a <= ecc_store(to_integer(cpu_wr_word));
+        end if;
+    end process;
+
+    -- Port B: Scrubber read/write
+    process (clk_i)
+    begin
+        if rising_edge(clk_i) then
+            if (ecc_scrub_wr = '1') then
+                ecc_store(to_integer(scrub_ptr)) <= '0' & scrub_enc_code;
+            end if;
+            ecc_stored_code <= ecc_store(to_integer(scrub_ptr))(6 downto 0);
+        end if;
+    end process;
 
     -- -------------------------------------------------------------------------
     -- Conflict detection
@@ -207,21 +228,6 @@ begin
 
     conflict <= '1' when (cpu_wr_active = '1') and (cpu_wr_word = scrub_ptr) else
         '0';
-
-    -- -------------------------------------------------------------------------
-    -- ECC store write: CPU has priority, then scrubber
-    -- -------------------------------------------------------------------------
-
-    p_ecc_store : process (clk_i)
-    begin
-        if rising_edge(clk_i) then
-            if (cpu_wr_active = '1') then
-                ecc_store(to_integer(cpu_wr_word)) <= cpu_enc_code;
-            elsif (ecc_scrub_wr = '1') then
-                ecc_store(to_integer(scrub_ptr)) <= scrub_enc_code;
-            end if;
-        end if;
-    end process p_ecc_store;
 
     -- -------------------------------------------------------------------------
     -- FSM sequential: state register and pointer
