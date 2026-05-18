@@ -49,7 +49,7 @@ set_property INCREMENTAL false [get_filesets sim_1]
 # -----------------------------------------------------------------------------
 set neorv32_home [file normalize "$script_dir/.."]
 
-set file_list_raw  [read [open "$neorv32_home/rtl/file_list_soc.f" r]]
+set file_list_raw  [read [open "$neorv32_home/rtl/file_list_seu_soc.f" r]]
 set core_files     [string map \
     [list "NEORV32_RTL_PATH_PLACEHOLDER" "$neorv32_home/rtl"] \
     $file_list_raw]
@@ -77,17 +77,17 @@ update_compile_order -fileset sources_1
 # -----------------------------------------------------------------------------
 # 5. Add SEU mitigation source files (directory may be empty initially)
 # -----------------------------------------------------------------------------
-set mit_files [glob -nocomplain "$rtl_dir/seu/*.vhd"]
-# Remove a specific file (e.g., exclude "exclude_me.vhd")
-set mit_files [lsearch -all -inline -not -exact $mit_files "$rtl_dir/seu/project_name.vhd"]
-set mit_files [lsearch -all -inline -not -exact $mit_files "$rtl_dir/seu/project_name_pkg.vhd"]
-
-if {[llength $mit_files] > 0} {
-    puts "INFO: Adding [llength $mit_files] mitigation module(s)"
-    add_files -norecurse $mit_files
-} else {
-    puts "INFO: rtl/seu/ is empty — no mitigation files added yet."
-}
+#set mit_files [glob -nocomplain "$rtl_dir/seu/*.vhd"]
+## Remove a specific file (e.g., exclude "exclude_me.vhd")
+#set mit_files [lsearch -all -inline -not -exact $mit_files "$rtl_dir/seu/project_name.vhd"]
+#set mit_files [lsearch -all -inline -not -exact $mit_files "$rtl_dir/seu/project_name_pkg.vhd"]
+#
+#if {[llength $mit_files] > 0} {
+#    puts "INFO: Adding [llength $mit_files] mitigation module(s)"
+#    add_files -norecurse $mit_files
+#} else {
+#    puts "INFO: rtl/seu/ is empty — no mitigation files added yet."
+#}
 
 # -----------------------------------------------------------------------------
 # 6. Set VHDL-2008 on every source file
