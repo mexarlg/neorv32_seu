@@ -143,22 +143,3 @@ set_false_path -from [get_ports { btn0 }]
 set_property BITSTREAM.GENERAL.COMPRESS    TRUE  [current_design]
 set_property CONFIG_VOLTAGE                3.3   [current_design]
 set_property CFGBVS                        VCCO  [current_design]
-#
-## Scrubber decoder to data RAM write (3 cycle multicycle path)
-#set_multicycle_path 3 -setup -from [get_cells */u_scrub_decoder/*] \
-#                              -to   [get_cells */gen_byte_ram[*].ram_inst/*]
-#set_multicycle_path 2 -hold  -from [get_cells */u_scrub_decoder/*] \
-#                              -to   [get_cells */gen_byte_ram[*].ram_inst/*]
-#
-## Scrubber decoder through encoder to ECC RAM write (3 cycle multicycle path)
-#set_multicycle_path 3 -setup -from [get_cells */u_scrub_decoder/*] \
-#                              -to   [get_cells */u_ecc_ram/*]
-#set_multicycle_path 2 -hold  -from [get_cells */u_scrub_decoder/*] \
-#                              -to   [get_cells */u_ecc_ram/*]
-#
-## CPU encoder pipeline: data RAM write to ECC RAM write (2 cycle path)
-#set_multicycle_path 2 -setup -from [get_cells */gen_byte_ram[*].ram_inst/*] \
-#                              -to   [get_cells */u_ecc_ram/*]
-#set_multicycle_path 1 -hold  -from [get_cells */gen_byte_ram[*].ram_inst/*] \
-#                              -to   [get_cells */u_ecc_ram/*]
-#
