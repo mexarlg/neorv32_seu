@@ -35,38 +35,6 @@ end neorv32_dmem;
 architecture neorv32_dmem_rtl of neorv32_dmem is
 
     -- -------------------------------------------------------------------------
-    -- DMEM RAM wrapper with scrubbing component declaration
-    -- -------------------------------------------------------------------------
-    --component neorv32_dmem_ram_scrub
-    --    generic (
-    --        DMEM_AWIDTH : natural;
-    --        DMEM_OUTREG : boolean
-    --    );
-    --    port (
-    --        clk_i             : in std_ulogic;
-    --        rstn_i            : in std_ulogic;
-    --        scrub_en_i        : in std_ulogic;
-    --        cpu_ben_i         : in std_ulogic_vector(3 downto 0);
-    --        cpu_rw_i          : in std_ulogic;
-    --        cpu_addr_i        : in std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        cpu_data_i        : in std_ulogic_vector(31 downto 0);
-    --        cpu_data_o        : out std_ulogic_vector(31 downto 0);
-    --        flog_clear_i      : in std_ulogic;
-    --        flog_last_addr_o  : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        flog_count_o      : out std_ulogic_vector(7 downto 0);
-    --        flog_overflow_o   : out std_ulogic;
-    --        stat_data_valid_o : out std_ulogic;
-    --        stat_corrected_o  : out std_ulogic;
-    --        stat_detected_o   : out std_ulogic;
-    --        stat_state_o      : out std_ulogic_vector(2 downto 0);
-    --        stat_addr_o       : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        stat_conflict_o   : out std_ulogic;
-    --        stat_busy_o       : out std_ulogic;
-    --        stat_full_pass_o  : out std_ulogic
-    --    );
-    --end component;
-
-    -- -------------------------------------------------------------------------
     -- Auto-configuration
     -- -------------------------------------------------------------------------
     constant awidth_c : natural := index_size_f(DMEM_SIZE);

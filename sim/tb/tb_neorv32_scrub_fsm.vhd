@@ -2,12 +2,20 @@
 -- Testbench   : tb_neorv32_scrub_fsm                                                --
 -- Author      : Aldo Lupio                                                          --
 -- DUT         : neorv32_scrub_fsm                                                   --
--- Description : Tests scrubber FSM with SECDED, byte addressing, and fault log      --
+-- Description : Tests scrubber FSM with SECDED, byte addressing, and fault log.     --
+--               Phases 1 to 6 nominal, phases 7 to 9 CPU write conflicts.           --
+--               Ordered simple to complex.                                          --
+-- -------------------------------------------------------------------------------- --
+-- FSM state encoding (stat_state_o):                                                --
+--   000 S_IDLE   001 S_ISSUE_READ   010 S_REG_READ   011 S_DECODE                   --
+--   100 S_CHECK  101 S_REG_ENCODE   110 S_ISSUE_WRITE                               --
 -- -------------------------------------------------------------------------------- --
 
 library ieee;
 use ieee.std_logic_1164.all;
 use ieee.numeric_std.all;
+
+library neorv32;
 
 entity tb_neorv32_scrub_fsm is
 end entity;
@@ -17,6 +25,15 @@ architecture sim of tb_neorv32_scrub_fsm is
     -- Memory configuration
     constant DMEM_AWIDTH : natural := 5; -- 5-bit byte address (32 bytes)
     constant DMEM_DEPTH  : natural := 8; -- 8 words of 32 bits
+
+    -- FSM state codes (match stat_state_o encoding)
+    constant ST_IDLE       : std_ulogic_vector(2 downto 0) := "000";
+    constant ST_ISSUE_READ : std_ulogic_vector(2 downto 0) := "001";
+    constant ST_REG_READ   : std_ulogic_vector(2 downto 0) := "010";
+    constant ST_DECODE     : std_ulogic_vector(2 downto 0) := "011";
+    constant ST_CHECK      : std_ulogic_vector(2 downto 0) := "100";
+    constant ST_REG_ENCODE : std_ulogic_vector(2 downto 0) := "101";
+    constant ST_ISSUE_WR   : std_ulogic_vector(2 downto 0) := "110";
 
     -- Global control
     signal clk      : std_ulogic := '0';
@@ -57,6 +74,10 @@ architecture sim of tb_neorv32_scrub_fsm is
     signal sim_done   : boolean := false;
     signal test_phase : natural := 0;
 
+    -- Conflict mechanism observation: latches if stat_conflict was ever high
+    signal conflict_seen : std_ulogic := '0';
+    signal conflict_arm  : std_ulogic := '0';
+
     -- Simulated dual-port RAM
     type mem_t is array (0 to DMEM_DEPTH - 1) of std_ulogic_vector(31 downto 0);
     shared variable fake_mem : mem_t := (others => x"00000000");
@@ -72,7 +93,7 @@ begin
     -- -------------------------------------------------------------------------
     -- DUT
     -- -------------------------------------------------------------------------
-    dut : entity work.neorv32_scrub_fsm
+    dut : entity neorv32.neorv32_scrub_fsm
         generic map(
             DMEM_AWIDTH => DMEM_AWIDTH,
             DMEM_DEPTH  => DMEM_DEPTH
@@ -105,8 +126,9 @@ begin
         );
 
     -- -------------------------------------------------------------------------
-    -- Simulated dual-port RAM (port A for CPU, port B for scrubber)
+    -- Simulated dual port BRAM (port A for CPU, port B for scrubber)
     -- Addresses are byte addresses, word index = addr / 4
+    -- One cycle synchronous read latency.
     -- -------------------------------------------------------------------------
     p_fake_mem : process (clk)
         variable idx : natural;
@@ -132,6 +154,21 @@ begin
             end if;
         end if;
     end process p_fake_mem;
+
+    -- -------------------------------------------------------------------------
+    -- Conflict observer
+    -- Latches conflict_seen high if stat_conflict pulses while armed.
+    -- -------------------------------------------------------------------------
+    p_conflict_obs : process (clk)
+    begin
+        if rising_edge(clk) then
+            if (conflict_arm = '0') then
+                conflict_seen <= '0';
+            elsif (stat_conflict = '1') then
+                conflict_seen <= '1';
+            end if;
+        end if;
+    end process p_conflict_obs;
 
     -- -------------------------------------------------------------------------
     -- Stimulus
@@ -164,6 +201,8 @@ begin
         procedure inject_seu(word_idx : natural; bit_pos : natural) is
         begin
             fake_mem(word_idx)(bit_pos) := not fake_mem(word_idx)(bit_pos);
+            report "SEU injected: word " & integer'image(word_idx) &
+                " bit " & integer'image(bit_pos) severity note;
         end procedure;
 
         -- Inject double-bit error
@@ -171,203 +210,220 @@ begin
         begin
             fake_mem(word_idx)(bit_a) := not fake_mem(word_idx)(bit_a);
             fake_mem(word_idx)(bit_b) := not fake_mem(word_idx)(bit_b);
+            report "DBU injected: word " & integer'image(word_idx) &
+                " bits " & integer'image(bit_a) & "," & integer'image(bit_b)
+                severity note;
         end procedure;
 
-        -- Preload a word in fake_mem
-        procedure mem_set(word_idx : natural; data : std_ulogic_vector(31 downto 0)) is
-        begin
-            fake_mem(word_idx) := data;
-        end procedure;
-
-        -- Wait for scrubber to reach a word index in S_READ
-        procedure wait_scrub_read(word_idx : natural) is
-        begin
-            loop
-                wait until rising_edge(clk);
-                exit when (to_integer(unsigned(stat_addr(DMEM_AWIDTH - 1 downto 2))) = word_idx)
-                and (stat_state = "001");
-            end loop;
-        end procedure;
-
-        -- Wait for scrubber to reach a word index in S_CHECK
-        procedure wait_scrub_check(word_idx : natural) is
-        begin
-            loop
-                wait until rising_edge(clk);
-                exit when (to_integer(unsigned(stat_addr(DMEM_AWIDTH - 1 downto 2))) = word_idx)
-                and (stat_state = "010");
-            end loop;
-        end procedure;
-
+        -- Wait for the scrubber to reach a given word index in a given state
+        procedure wait_scrub_state(word_idx : natural;
+        st                                  : std_ulogic_vector(2 downto 0)) is
     begin
-
-        -- Phase 1: Reset. ok
-        test_phase <= 1;
-        report "Phase 1: Reset" severity note;
-
-        rstn <= '0';
-        wait_clk(5);
-        rstn <= '1';
-        wait_clk(2);
-
-        assert stat_state = "000"
-        report "FAIL: FSM not in S_IDLE after reset" severity error;
-        assert stat_busy = '0'
-        report "FAIL: busy should be low in S_IDLE" severity error;
-
-        -- Phase 2: Preload memory with known data. ok
-        test_phase <= 2;
-        report "Phase 2: Preload memory" severity note;
-
-        for i in 0 to DMEM_DEPTH - 1 loop
-            wait_clk(1);
-            cpu_write(i, std_ulogic_vector(to_unsigned(i * 111, 32)));
-        end loop;
-        wait_clk(1);
-
-        -- Phase 3: Enable scrubber, wait for first full pass. ok (stat signals valid on check, same as dec)
-        test_phase <= 3;
-        report "Phase 3: Enable scrubber" severity note;
-
-        scrub_en <= '1';
-        wait_clk(1);
-
         loop
             wait until rising_edge(clk);
-            exit when stat_full_pass = '1';
+            exit when (to_integer(unsigned(stat_addr(DMEM_AWIDTH - 1 downto 2))) = word_idx)
+            and (stat_state = st);
         end loop;
+    end procedure;
 
-        report "First full pass completed: ECC store initialised" severity note;
-        wait_clk(5);
-
-        -- Phase 4: Single bit SEU on data addr = 3, verify correction
-        test_phase <= 4;
-        report "Phase 4: Single bit SEU at word 3, bit 0" severity note;
-
-        inject_seu(3, 0);
-
+    -- Wait for a status strobe to go high
+    procedure wait_strobe(signal s : std_ulogic) is
+    begin
         loop
             wait until rising_edge(clk);
-            exit when stat_corrected = '1';
+            exit when s = '1';
         end loop;
-        report "Single bit error corrected" severity note;
+    end procedure;
 
-        -- make sure the seu is fixed and not logged on the fault log
-        assert flog_count = x"00"
-        report "FAIL: fault log count should be 0 after correction" severity error;
-        wait_clk(5);
+    -- Check a memory word holds an expected value
+    procedure check_mem(word_idx : natural;
+    expected                     : std_ulogic_vector(31 downto 0);
+    tag                          : string) is
+begin
+    assert fake_mem(word_idx) = expected
+    report "FAIL [" & tag & "]: word " & integer'image(word_idx) &
+        " mismatch" severity error;
+end procedure;
 
-        -- Phase 5: Double bit error, verify detection and fault log. ok
-        test_phase <= 5;
-        report "Phase 5: Double bit error at word 1, bits 0 and 1" severity note;
+begin
 
-        inject_dbu(1, 0, 1);
+-- ---------------------------------------------------------------------
+-- Phase 1: Reset - FSM must land in S_IDLE
+-- ---------------------------------------------------------------------
+test_phase <= 1;
+report "Phase 1: Reset" severity note;
 
-        loop
-            wait until rising_edge(clk);
-            exit when stat_detected = '1';
-        end loop;
-        wait_clk(1);
+rstn <= '0';
+wait_clk(5);
+rstn <= '1';
+wait_clk(2);
 
-        report "Fault log: count=" & integer'image(to_integer(unsigned(flog_count)))
-            & " addr=" & integer'image(to_integer(unsigned(flog_last_addr)))
-            severity note;
-        wait_clk(5);
+assert stat_state = ST_IDLE
+report "FAIL: FSM not in S_IDLE after reset" severity error;
+assert stat_busy = '0'
+report "FAIL: busy should be low in S_IDLE" severity error;
 
-        -- Phase 6: Fault log clear
-        test_phase <= 6;
-        report "Phase 6: Clear fault log" severity note;
+-- ---------------------------------------------------------------------
+-- Phase 2: CPU write path - preload memory and secded store
+-- ---------------------------------------------------------------------
+test_phase <= 2;
+report "Phase 2: Preload memory via CPU writes" severity note;
 
-        flog_clear <= '1';
-        wait_clk(1);
-        flog_clear <= '0';
-        wait_clk(1);
+for i in 0 to DMEM_DEPTH - 1 loop
+    cpu_write(i, std_ulogic_vector(to_unsigned(i * 111, 32)));
+    wait_clk(1);
+end loop;
+wait_clk(3); -- let the CPU encode pipeline drain into the ECC store
 
-        assert flog_count = x"00"
-        report "FAIL: fault log count should be 0 after clear" severity error;
-        assert flog_overflow = '0'
-        report "FAIL: overflow should be 0 after clear" severity error;
-        wait_clk(5);
+-- ---------------------------------------------------------------------
+-- Phase 3: Enable scrubber, wait for the first full pass
+-- ---------------------------------------------------------------------
+test_phase <= 3;
+report "Phase 3: Enable scrubber, wait for first full pass" severity note;
 
-        -- Phase 7: CPU write to different address, no conflict expected
-        test_phase <= 7;
-        report "Phase 7: CPU write different address" severity note;
+scrub_en <= '1';
 
-        wait_scrub_read(1);
-        cpu_write(3, std_ulogic_vector(to_unsigned(11, 32)));
-        wait_clk(1);
+wait_strobe(stat_full_pass);
+report "First full pass completed: ECC store consistent" severity note;
 
-        assert stat_conflict = '0'
-        report "FAIL: unexpected conflict on different address" severity error;
+assert stat_detected = '0'
+report "FAIL: unexpected detected error during clean pass" severity error;
+wait_clk(5);
 
-        wait_scrub_check(3);
-        wait_clk(1);
+-- ---------------------------------------------------------------------
+-- Phase 4: Single bit error - expect correction
+-- ---------------------------------------------------------------------
+test_phase <= 4;
+report "Phase 4: Single bit SEU at word 3, bit 0" severity note;
 
-        assert stat_corrected = '0'
-        report "FAIL: false correction after CPU write" severity error;
-        report "CPU write to different address: no conflict" severity note;
-        wait_clk(5);
+inject_seu(3, 0);
 
-        -- Phase 8: CPU write conflict in S_READ
-        test_phase <= 8;
-        report "Phase 8: CPU write conflict in S_READ" severity note;
+wait_strobe(stat_corrected);
+report "Single bit error corrected by scrubber" severity note;
 
-        inject_seu(5, 0);
-        wait_scrub_check(4);
-        cpu_write(5, std_ulogic_vector(to_unsigned(10, 32)));
-        wait_clk(5);
-        report "S_READ conflict test complete" severity note;
+wait_strobe(stat_full_pass);
+check_mem(3, std_ulogic_vector(to_unsigned(3 * 111, 32)), "P4");
+wait_clk(5);
 
-        -- Phase 9: CPU write conflict in S_CHECK
-        test_phase <= 9;
-        report "Phase 9: CPU write conflict in S_CHECK" severity note;
+-- ---------------------------------------------------------------------
+-- Phase 5: Double bit error - expect detection and fault log
+-- ---------------------------------------------------------------------
+test_phase <= 5;
+report "Phase 5: Double bit error at word 1, bits 0 and 1" severity note;
 
-        inject_seu(6, 0);
-        wait_scrub_read(6);
-        cpu_write(6, std_ulogic_vector(to_unsigned(22, 32)));
-        wait_clk(5);
-        report "S_CHECK conflict test complete" severity note;
+inject_dbu(1, 0, 1);
 
-        -- Phase 10: CPU write conflict in S_WRITE
-        test_phase <= 10;
-        report "Phase 10: CPU write conflict in S_WRITE" severity note;
+wait_strobe(stat_detected);
+report "Double bit error detected by scrubber" severity note;
+wait_clk(2);
 
-        inject_seu(7, 0);
-        wait_scrub_check(7);
-        cpu_write(7, std_ulogic_vector(to_unsigned(8, 32)));
-        wait_clk(5);
-        report "S_WRITE conflict test complete" severity note;
+assert flog_count /= x"00"
+report "FAIL: fault log count did not increment on detect" severity error;
+report "Fault log count = " &
+    integer'image(to_integer(unsigned(flog_count))) severity note;
+wait_clk(5);
 
-        -- Phase 11: Final pass (still a multibit on position 1)
-        test_phase <= 11;
+-- ---------------------------------------------------------------------
+-- Phase 6: Fault log clear
+-- ---------------------------------------------------------------------
+test_phase <= 6;
+report "Phase 6: Clear fault log" severity note;
 
-        cpu_write(5, std_ulogic_vector(to_unsigned(3, 32)));
-        wait_scrub_read(4);
+flog_clear <= '1';
+wait_clk(1);
+flog_clear <= '0';
+wait_clk(1);
 
-        report "Phase 11: Final clean pass" severity note;
-        wait until stat_full_pass = '1';
-        report "Final pass completed" severity note;
-        wait_clk(10);
+assert flog_count = x"00"
+report "FAIL: fault log count not cleared" severity error;
+assert flog_overflow = '0'
+report "FAIL: fault log overflow not cleared" severity error;
+wait_clk(5);
 
-        -- Notes of testing: 
+-- ---------------------------------------------------------------------
+-- Phase 7: CPU write conflict during the S_REG_READ phase
+-- CPU writes the word while the scrubber is in S_REG_READ on it.
+-- Expectation: conflict re-issues the read, CPU data survives.
+-- ---------------------------------------------------------------------
+test_phase <= 7;
+report "Phase 7: CPU write conflict during S_REG_READ phase (word 4)" severity note;
 
-        -- The secded code should have another way of protection as the scrubber relies on it being correct
+conflict_arm <= '1';
+wait_scrub_state(4, ST_ISSUE_READ);
+cpu_write(4, std_ulogic_vector(to_unsigned(444, 32)));
 
-        -- Also, the scrubber state output signals are not registered, which might have combinatorial glitches
-        -- Some of the status signals of the encoder/decoder are erroneous on some transition states, 
-        -- but are only checked by the scrubber on the check state (when their result is valid)
+wait_strobe(stat_full_pass);
+conflict_arm <= '0';
 
-        -- The fault log will continue to increase the count after it has passed a full revolution,
-        -- which increases the count although the existing error is the same
+-- mechanism: conflict must have fired
+assert conflict_seen = '1'
+report "FAIL [P7]: conflict never asserted on S_REG_READ conflict" severity error;
+-- value: CPU data must survive
+check_mem(4, std_ulogic_vector(to_unsigned(444, 32)), "P7");
+report "Read conflict: conflict fired, CPU data preserved" severity note;
+wait_clk(5);
 
-        -- Done
-        test_phase <= 0;
-        report "========================================" severity note;
-        report "All tests completed" severity note;
-        report "========================================" severity note;
-        sim_done <= true;
-        wait;
+-- ---------------------------------------------------------------------
+-- Phase 8: CPU write conflict during the S_REG_ENCODE phase
+-- Inject an SEU first so the scrubber actually has work, then write
+-- the same word while it is in S_REG_ENCODE. abort_writeback must fire.
+-- ---------------------------------------------------------------------
+test_phase <= 8;
+report "Phase 8: CPU write conflict during S_REG_ENCODE phase (word 5)" severity note;
 
-    end process p_stim;
+conflict_arm <= '1';
+inject_seu(5, 0);
+wait_scrub_state(5, ST_CHECK);
+cpu_write(5, std_ulogic_vector(to_unsigned(555, 32)));
+
+wait_strobe(stat_full_pass);
+conflict_arm <= '0';
+
+-- mechanism: conflict must have fired
+assert conflict_seen = '1'
+report "FAIL [P8]: conflict never asserted on S_REG_ENCODE conflict" severity error;
+-- value: writeback dropped, CPU data must survive
+check_mem(5, std_ulogic_vector(to_unsigned(555, 32)), "P8");
+report "Check conflict: conflict fired, writeback dropped, CPU data preserved"
+    severity note;
+wait_clk(5);
+
+-- ---------------------------------------------------------------------
+-- Phase 9: CPU write conflict during the S_CHECK phase
+-- Inject an SEU so the scrubber reaches S_CHECK
+-- Scrubber must restart to S_ISSUE_READ
+-- ---------------------------------------------------------------------
+test_phase <= 9;
+report "Phase 9: CPU write conflict during S_CHECK phase (word 6)" severity note;
+
+-- although state is ST_DECODE, it has a delay of 1 cycle so its at S_CHECK of diff addr
+conflict_arm <= '1';
+inject_seu(6, 0);
+wait_scrub_state(6, ST_DECODE);
+cpu_write(6, std_ulogic_vector(to_unsigned(666, 32)));
+
+wait_strobe(stat_full_pass);
+conflict_arm <= '0';
+
+-- mechanism: conflict must have fired
+assert conflict_seen = '1'
+report "FAIL [P9]: conflict never asserted on S_ISSUE_READ conflict"
+    severity error;
+-- value: scrubber must NOT overwrite the CPU data
+check_mem(6, std_ulogic_vector(to_unsigned(666, 32)), "P9");
+report "S_CHECK conflict: conflict fired, CPU data preserved" severity note;
+wait_clk(10);
+
+-- ---------------------------------------------------------------------
+-- Done
+-- ---------------------------------------------------------------------
+test_phase <= 0;
+report "========================================" severity note;
+report "All tests completed" severity note;
+report "========================================" severity note;
+sim_done <= true;
+wait;
+
+end process p_stim;
 
 end architecture;

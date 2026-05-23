@@ -64,41 +64,6 @@ end neorv32_dmem_ram_scrub;
 architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
 
     -- -------------------------------------------------------------------------
-    -- Components declaration
-    -- -------------------------------------------------------------------------
-    --component neorv32_scrub_fsm
-    --    generic (
-    --        DMEM_AWIDTH : natural;
-    --        DMEM_DEPTH  : natural
-    --    );
-    --    port (
-    --        clk_i            : in std_ulogic;
-    --        rstn_i           : in std_ulogic;
-    --        scrub_en_i       : in std_ulogic;
-    --        cpu_ben_i        : in std_ulogic_vector(3 downto 0);
-    --        cpu_rw_i         : in std_ulogic;
-    --        cpu_addr_i       : in std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        cpu_data_i       : in std_ulogic_vector(31 downto 0);
-    --        scrub_en_o       : out std_ulogic;
-    --        scrub_rw_o       : out std_ulogic;
-    --        scrub_addr_o     : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        scrub_data_o     : out std_ulogic_vector(31 downto 0);
-    --        scrub_data_i     : in std_ulogic_vector(31 downto 0);
-    --        flog_clear_i     : in std_ulogic;
-    --        flog_last_addr_o : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        flog_count_o     : out std_ulogic_vector(7 downto 0);
-    --        flog_overflow_o  : out std_ulogic;
-    --        stat_corrected_o : out std_ulogic;
-    --        stat_detected_o  : out std_ulogic;
-    --        stat_state_o     : out std_ulogic_vector(2 downto 0);
-    --        stat_addr_o      : out std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    --        stat_conflict_o  : out std_ulogic;
-    --        stat_busy_o      : out std_ulogic;
-    --        stat_full_pass_o : out std_ulogic
-    --    );
-    --end component;
-
-    -- -------------------------------------------------------------------------
     -- Memory configuration
     -- -------------------------------------------------------------------------
     constant MEM_DEPTH    : natural := (2 ** DMEM_AWIDTH) / 4;
@@ -110,12 +75,6 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     -- -------------------------------------------------------------------------
     signal addr_a : std_ulogic_vector(WORD_ADDR_HI - WORD_ADDR_LO downto 0);
     signal addr_b : std_ulogic_vector(WORD_ADDR_HI - WORD_ADDR_LO downto 0);
-
-    -- -------------------------------------------------------------------------
-    -- Port A read data (before optional output register)
-    -- -------------------------------------------------------------------------
-    signal mem_a_rdata  : std_ulogic_vector(31 downto 0);
-    signal cpu_data_reg : std_ulogic_vector(31 downto 0);
 
     -- -------------------------------------------------------------------------
     -- Scrubber FSM signals (Port B)
@@ -135,12 +94,7 @@ begin
     addr_b <= scrub_addr(WORD_ADDR_HI downto WORD_ADDR_LO);
 
     -- -------------------------------------------------------------------------
-    -- 4x byte-wide true dual-port RAMs
-    --
-    -- Each instance is 8 bits wide and MEM_DEPTH deep. This follows the
-    -- standard Vivado true dual-port BRAM inference template: one process
-    -- per port, synchronous read and write, no async reset on storage.
-    --
+    -- 4x byte wide true dual port RAMs
     -- Port A: CPU (byte enable controlled via generate index)
     -- Port B: Scrubber (always full word, gated by scrub_en)
     -- -------------------------------------------------------------------------
@@ -165,23 +119,6 @@ begin
                 data_b_o => scrub_rdata(i * 8 + 7 downto i * 8)
             );
     end generate gen_byte_ram;
-
-    -- -------------------------------------------------------------------------
-    -- Port A output register (optional)
-    -- -------------------------------------------------------------------------
-    gen_outreg : if DMEM_OUTREG generate
-        p_outreg : process (clk_i)
-        begin
-            if rising_edge(clk_i) then
-                cpu_data_reg <= mem_a_rdata;
-            end if;
-        end process p_outreg;
-        cpu_data_o <= cpu_data_reg;
-    end generate gen_outreg;
-
-    gen_no_outreg : if not DMEM_OUTREG generate
-        cpu_data_o <= mem_a_rdata;
-    end generate gen_no_outreg;
 
     -- -------------------------------------------------------------------------
     -- Scrubber FSM: drives Port B, observes Port A
@@ -213,13 +150,14 @@ begin
             flog_count_o     => flog_count_o,
             flog_overflow_o  => flog_overflow_o,
             -- Status passthrough
-            stat_corrected_o => stat_corrected_o,
-            stat_detected_o  => stat_detected_o,
-            stat_state_o     => stat_state_o,
-            stat_addr_o      => stat_addr_o,
-            stat_conflict_o  => stat_conflict_o,
-            stat_busy_o      => stat_busy_o,
-            stat_full_pass_o => stat_full_pass_o
+            stat_data_valid_o => stat_data_valid_o,
+            stat_corrected_o  => stat_corrected_o,
+            stat_detected_o   => stat_detected_o,
+            stat_state_o      => stat_state_o,
+            stat_addr_o       => stat_addr_o,
+            stat_conflict_o   => stat_conflict_o,
+            stat_busy_o       => stat_busy_o,
+            stat_full_pass_o  => stat_full_pass_o
         );
 
     -- -------------------------------------------------------------------------
