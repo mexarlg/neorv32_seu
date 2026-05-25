@@ -26,6 +26,10 @@ architecture sim of tb_neorv32_scrub_fsm is
     constant DMEM_AWIDTH : natural := 5; -- 5-bit byte address (32 bytes)
     constant DMEM_DEPTH  : natural := 8; -- 8 words of 32 bits
 
+    -- Scrubber start / end memory word addresses
+    constant C_SCRUB_START : natural := 0;
+    constant C_SCRUB_END   : natural := 6;
+
     -- FSM state codes (match stat_state_o encoding)
     constant ST_IDLE       : std_ulogic_vector(2 downto 0) := "000";
     constant ST_ISSUE_READ : std_ulogic_vector(2 downto 0) := "001";
@@ -96,7 +100,9 @@ begin
     dut : entity neorv32.neorv32_scrub_fsm
         generic map(
             DMEM_AWIDTH => DMEM_AWIDTH,
-            DMEM_DEPTH  => DMEM_DEPTH
+            DMEM_DEPTH  => DMEM_DEPTH,
+            SCRUB_START => C_SCRUB_START,
+            SCRUB_END   => C_SCRUB_END
         )
         port map(
             clk_i             => clk,

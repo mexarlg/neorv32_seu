@@ -36,7 +36,9 @@ library neorv32;
 entity neorv32_scrub_fsm is
     generic (
         DMEM_AWIDTH : natural; -- byte address width of DMEM
-        DMEM_DEPTH  : natural  -- number of 32 bit words (DMEM_SIZE / 4)
+        DMEM_DEPTH  : natural; -- number of 32 bit words (DMEM_SIZE / 4)
+        SCRUB_START : natural; -- first word index to scrub
+        SCRUB_END   : natural  -- last word index to scrub
     );
     port (
         -- Global control
@@ -378,14 +380,14 @@ begin
     begin
         if (rstn_i = '0') then
             state     <= S_IDLE;
-            scrub_ptr <= (others => '0');
+            scrub_ptr <= to_unsigned(SCRUB_START, scrub_ptr'length);
 
         elsif rising_edge(clk_i) then
             state <= state_next;
 
             if (scrub_ptr_incr = '1') then
-                if (scrub_ptr = DMEM_DEPTH - 1) then
-                    scrub_ptr <= (others => '0');
+                if (scrub_ptr = SCRUB_END) then
+                    scrub_ptr <= to_unsigned(SCRUB_START, scrub_ptr'length);
                 else
                     scrub_ptr <= scrub_ptr + 1;
                 end if;
@@ -561,7 +563,7 @@ begin
         '1';
 
     stat_full_pass_o <= '1' when (scrub_ptr_incr = '1') and
-        (scrub_ptr = DMEM_DEPTH - 1) else
+        (scrub_ptr = SCRUB_END) else
         '0';
 
 end neorv32_scrub_fsm_rtl;

@@ -28,7 +28,9 @@ library neorv32;
 entity neorv32_dmem_ram_scrub is
     generic (
         DMEM_AWIDTH : natural; -- byte address width
-        DMEM_OUTREG : boolean  -- add output register stage on Port A reads
+        DMEM_OUTREG : boolean; -- add output register stage on Port A reads
+        SCRUB_START : natural; -- first word index to scrub
+        SCRUB_END   : natural  -- last word index to scrub
     );
     port (
         -- Global control
@@ -143,7 +145,9 @@ begin
     u_scrub_fsm : entity neorv32.neorv32_scrub_fsm
         generic map(
             DMEM_AWIDTH => DMEM_AWIDTH,
-            DMEM_DEPTH  => MEM_DEPTH
+            DMEM_DEPTH  => MEM_DEPTH,
+            SCRUB_START => SCRUB_START,
+            SCRUB_END   => SCRUB_END
         )
         port map(
             -- Global control

@@ -48,6 +48,12 @@ architecture neorv32_dmem_rtl of neorv32_dmem is
     signal rden  : std_ulogic_vector(1 downto 0);
     signal ben   : std_ulogic_vector(3 downto 0);
 
+    -- -------------------------------------------------------------------------
+    -- Scrubber start / end memory word addresses
+    -- -------------------------------------------------------------------------
+    constant C_SCRUB_START : natural := 0;
+    constant C_SCRUB_END   : natural := ((2 ** awidth_c) / 4) - 1;
+
 begin
 
     -- -------------------------------------------------------------------------
@@ -62,7 +68,9 @@ begin
     dmem_ram_inst : entity neorv32.neorv32_dmem_ram_scrub
         generic map(
             DMEM_AWIDTH => awidth_c,
-            DMEM_OUTREG => OUTREG_EN
+            DMEM_OUTREG => OUTREG_EN,
+            SCRUB_START => C_SCRUB_START,
+            SCRUB_END   => C_SCRUB_END
         )
         port map(
             -- Global control
