@@ -64,6 +64,16 @@ end neorv32_dmem_ram_scrub;
 architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
 
     -- -------------------------------------------------------------------------
+    -- Component IP declaration (VIO)
+    -- -------------------------------------------------------------------------
+    component vio_scrub
+        port (
+            clk        : in std_logic;
+            probe_out0 : out std_logic_vector(0 downto 0)
+        );
+    end component;
+
+    -- -------------------------------------------------------------------------
     -- Memory configuration
     -- -------------------------------------------------------------------------
     constant MEM_DEPTH    : natural := (2 ** DMEM_AWIDTH) / 4;
@@ -84,6 +94,13 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     signal scrub_addr  : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
     signal scrub_wdata : std_ulogic_vector(31 downto 0);
     signal scrub_rdata : std_ulogic_vector(31 downto 0);
+
+    -- -------------------------------------------------------------------------
+    -- VIO CDC connection signals
+    -- -------------------------------------------------------------------------
+    signal vio_scrub_en_raw  : std_logic_vector(0 downto 0);
+    signal vio_scrub_en_meta : std_ulogic;
+    signal vio_scrub_en_sync : std_ulogic;
 
 begin
 
@@ -132,7 +149,7 @@ begin
             -- Global control
             clk_i      => clk_i,
             rstn_i     => rstn_i,
-            scrub_en_i => scrub_en_i,
+            scrub_en_i => vio_scrub_en_sync,
             -- CPU write monitoring
             cpu_ben_i  => cpu_ben_i,
             cpu_rw_i   => cpu_rw_i,
@@ -159,6 +176,24 @@ begin
             stat_busy_o       => stat_busy_o,
             stat_full_pass_o  => stat_full_pass_o
         );
+
+    -- -------------------------------------------------------------------------
+    -- VIO to scrub_en connection
+    -- -------------------------------------------------------------------------
+    vio_scrub_i : vio_scrub
+    port map(
+        clk        => clk_i,
+        probe_out0 => vio_scrub_en_raw
+    );
+
+    -- Synchronize the VIO output (already done by vio but just in case, also change to ulogic)
+    p_vio_sync : process (clk_i)
+    begin
+        if rising_edge(clk_i) then
+            vio_scrub_en_meta <= std_ulogic(vio_scrub_en_raw(0));
+            vio_scrub_en_sync <= vio_scrub_en_meta;
+        end if;
+    end process p_vio_sync;
 
     -- -------------------------------------------------------------------------
     -- Synthesis info

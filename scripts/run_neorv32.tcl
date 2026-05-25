@@ -90,6 +90,21 @@ update_compile_order -fileset sources_1
 #}
 
 # -----------------------------------------------------------------------------
+# 5b. Generate the VIO debug core for the scrubber enable
+# -----------------------------------------------------------------------------
+puts "INFO: Creating VIO core 'vio_scrub'"
+
+create_ip -name vio -vendor xilinx.com -library ip -version 3.0 \
+          -module_name vio_scrub
+
+set_property -dict [list \
+    CONFIG.C_NUM_PROBE_OUT {1} \
+    CONFIG.C_PROBE_OUT0_WIDTH {1} \
+    CONFIG.C_NUM_PROBE_IN {0} ] [get_ips vio_scrub]
+
+generate_target all [get_ips vio_scrub]
+
+# -----------------------------------------------------------------------------
 # 6. Set VHDL-2008 on every source file
 #    NEORV32 REQUIRES VHDL-2008. Forgetting this is the #1 cause of
 #    cryptic synthesis errors with NEORV32 in Vivado.
