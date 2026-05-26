@@ -1,18 +1,17 @@
 // ============================================================================
 // scrub_test.c - DMEM Background Scrubber
 // ----------------------------------------------------------------------------
-// Purpose:
-//   Validate on real hardware that the scrubber does NOT corrupt good data.
 //
 // How it works:
 //   1. A large initialized global array (test_block) is placed in .data.
 //      crt0 fills it with known values before main() runs, so every word
 //      is already a valid SECDED codeword by the time the scrubber starts.
-//   2. The program prints a banner, then loops forever re-checking that
-//      every word of test_block still holds its expected value.
+//   2. The program prints a banner, then loops forever: recheck every word,
+//      then do a burst of CPU writes into the scrubber's range.
 //   3. You enable the scrubber (VIO click) AFTER the banner appears.
 //   4. If the scrubber is sound, the check stays green forever.
 //      If the scrubber corrupts a word, the mismatch is printed over UART.
+//      The CPU write bursts collide with the scrubber
 //
 // ============================================================================
 
@@ -24,9 +23,10 @@
 // ----------------------------------------------------------------------------
 #define BAUD_RATE      19200
 #define TEST_WORDS     512          // size of the test region, in 32-bit words
-#define EXPECTED(i)    (0xA5A50000u + (uint32_t)(i))   // known value per word
+#define CONFLICT_HITS  64           // CPU writes per conflict burst
 
-volatile uint32_t test_block[TEST_WORDS];
+volatile uint32_t test_block[TEST_WORDS];   // memory under test (real DMEM)
+uint32_t expected[TEST_WORDS];              // software mirror of expected values
 
 // ----------------------------------------------------------------------------
 // Helper functions
@@ -34,7 +34,9 @@ volatile uint32_t test_block[TEST_WORDS];
 void fill_test_block(void)
 {
     for (int i = 0; i < TEST_WORDS; i++) {
-        test_block[i] = EXPECTED(i);
+        uint32_t v = 0xA5A50000u + (uint32_t)i;
+        test_block[i] = v;
+        expected[i]   = v;          // keep mirror in sync
     }
 }
 
@@ -44,16 +46,27 @@ int verify_test_block(void)
 
     for (int i = 0; i < TEST_WORDS; i++) {
         uint32_t got = test_block[i];
-        uint32_t exp = EXPECTED(i);
-        if (got != exp) {
+        if (got != expected[i]) {
             errors++;
             neorv32_uart0_printf("MISMATCH word %u  addr 0x%x  got 0x%x  exp 0x%x\n",
                                  (uint32_t)i,
                                  (uint32_t)&test_block[i],
-                                 got, exp);
+                                 got, expected[i]);
         }
     }
     return errors;
+}
+
+// CPU write burst into the scrubber's range which generates conflicts.
+// Every write updates the mirror too, so verify stays consistent.
+void cpu_write_burst(uint32_t seed)
+{
+    for (int k = 0; k < CONFLICT_HITS; k++) {
+        int i = (int)((seed + (uint32_t)k) % TEST_WORDS);
+        uint32_t v = 0xC0FFEE00u + seed + (uint32_t)k;
+        test_block[i] = v;          // real CPU write -> DMEM port A
+        expected[i]   = v;          // keep mirror in sync
+    }
 }
 
 // ----------------------------------------------------------------------------
@@ -91,8 +104,8 @@ int main(void)
     neorv32_uart0_printf("Enable scrubber (VIO). Monitoring...\n");
 
     // ------------------------------------------------------------------------
-    // Continuous no harm monitoring loop.
-    // Prints a heartbeat every pass so a silent UART means the program hung
+    // Monitoring loop: verify, then CPU write burst into the scrubber range.
+    // Prints a heartbeat every pass so a silent UART means the program hung.
     // ------------------------------------------------------------------------
     uint32_t pass = 0;
 
@@ -106,6 +119,9 @@ int main(void)
             neorv32_uart0_printf("pass %u: %d MISMATCH(es) - "
                                  "scrubber corrupted data!\n", pass, errors);
         }
+
+        // CPU write burst -> collides with the scrubber
+        cpu_write_burst(pass);
 
         // small delay so the UART is readable
         for (volatile int d = 0; d < 200000; d++) { }
