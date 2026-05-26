@@ -66,7 +66,7 @@ end neorv32_dmem_ram_scrub;
 architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
 
     -- -------------------------------------------------------------------------
-    -- Component IP declaration (VIO)
+    -- Component IP declarations (VIO, ILA)
     -- -------------------------------------------------------------------------
     component vio_scrub
         port (
@@ -75,6 +75,18 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
         );
     end component;
 
+    component ila_scrub
+
+        port (
+            clk    : in std_logic;
+            probe0 : in std_logic_vector(2 downto 0);
+            probe1 : in std_logic_vector(0 downto 0);
+            probe2 : in std_logic_vector(0 downto 0);
+            probe3 : in std_logic_vector(0 downto 0);
+            probe4 : in std_logic_vector(7 downto 0);
+            probe5 : in std_logic_vector(0 downto 0)
+        );
+    end component;
     -- -------------------------------------------------------------------------
     -- Memory configuration
     -- -------------------------------------------------------------------------
@@ -103,6 +115,14 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     signal vio_scrub_en_raw  : std_logic_vector(0 downto 0);
     signal vio_scrub_en_meta : std_ulogic;
     signal vio_scrub_en_sync : std_ulogic;
+
+    -- -------------------------------------------------------------------------
+    -- ILA CONVERSION SIGNALS
+    -- -------------------------------------------------------------------------
+    signal corrected_slv : std_logic_vector(0 downto 0);
+    signal detected_slv  : std_logic_vector(0 downto 0);
+    signal conflict_slv  : std_logic_vector(0 downto 0);
+    signal full_pass_slv : std_logic_vector(0 downto 0);
 
 begin
 
@@ -198,6 +218,25 @@ begin
             vio_scrub_en_sync <= vio_scrub_en_meta;
         end if;
     end process p_vio_sync;
+
+    -- -------------------------------------------------------------------------
+    -- ILA TO CHECK STATUS SIGNALS
+    -- -------------------------------------------------------------------------
+    corrected_slv(0) <= std_logic(stat_corrected_o);
+    detected_slv(0)  <= std_logic(stat_detected_o);
+    conflict_slv(0)  <= std_logic(stat_conflict_o);
+    full_pass_slv(0) <= std_logic(stat_full_pass_o);
+
+    ila_scrub_i : ila_scrub
+    port map(
+        clk    => std_logic(clk_i),
+        probe0 => std_logic_vector(stat_state_o), -- state encoded on 3 bits (000Idle, 001IssRead, 010RegRead, 011Dec, 100Check, 101Enc, 110IssWrite)
+        probe1 => corrected_slv,                  -- Pulse showing a correction (1bit) from scrubber
+        probe2 => detected_slv,                   -- Pulse showing a detection (2bit) from scrubber
+        probe3 => conflict_slv,                   -- CPU issues wr on same address as scrubber
+        probe4 => std_logic_vector(flog_count_o), -- Number of detected errors (2bit, unfixable)
+        probe5 => full_pass_slv                   -- Pulse of full revolution done
+    );
 
     -- -------------------------------------------------------------------------
     -- Synthesis info

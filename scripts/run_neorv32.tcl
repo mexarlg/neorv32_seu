@@ -105,6 +105,33 @@ set_property -dict [list \
 generate_target all [get_ips vio_scrub]
 
 # -----------------------------------------------------------------------------
+# 5c. Generate ILA core for scrubber status monitoring
+# -----------------------------------------------------------------------------
+create_ip -name ila -vendor xilinx.com -library ip -version 6.2 \
+          -module_name ila_scrub
+
+set_property -dict [list \
+    CONFIG.C_DATA_DEPTH        {2048} \
+    CONFIG.C_TRIGIN_EN         {false} \
+    CONFIG.C_TRIGOUT_EN        {false} \
+    CONFIG.C_INPUT_PIPE_STAGES {1} \
+    CONFIG.C_EN_STRG_QUAL      {1} \
+    CONFIG.C_ADV_TRIGGER       {true} \
+    CONFIG.ALL_PROBE_SAME_MU       {true} \
+    CONFIG.ALL_PROBE_SAME_MU_CNT   {2} \
+    CONFIG.C_NUM_OF_PROBES     {6} \
+    CONFIG.C_PROBE0_WIDTH      {3} \
+    CONFIG.C_PROBE1_WIDTH      {1} \
+    CONFIG.C_PROBE2_WIDTH      {1} \
+    CONFIG.C_PROBE3_WIDTH      {1} \
+    CONFIG.C_PROBE4_WIDTH      {8} \
+    CONFIG.C_PROBE5_WIDTH      {1} \
+] [get_ips ila_scrub]
+
+generate_target all [get_ips ila_scrub]
+update_compile_order -fileset sources_1
+
+# -----------------------------------------------------------------------------
 # 6. Set VHDL-2008 on every source file
 #    NEORV32 REQUIRES VHDL-2008. Forgetting this is the #1 cause of
 #    cryptic synthesis errors with NEORV32 in Vivado.
