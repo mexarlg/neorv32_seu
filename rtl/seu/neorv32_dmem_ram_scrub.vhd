@@ -76,15 +76,25 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     end component;
 
     component ila_scrub
-
         port (
-            clk    : in std_logic;
-            probe0 : in std_logic_vector(2 downto 0);
-            probe1 : in std_logic_vector(0 downto 0);
-            probe2 : in std_logic_vector(0 downto 0);
-            probe3 : in std_logic_vector(0 downto 0);
-            probe4 : in std_logic_vector(7 downto 0);
-            probe5 : in std_logic_vector(0 downto 0)
+            clk     : in std_logic;
+            probe0  : in std_logic_vector(0 downto 0);
+            probe1  : in std_logic_vector(3 downto 0);
+            probe2  : in std_logic_vector(14 downto 0);
+            probe3  : in std_logic_vector(31 downto 0);
+            probe4  : in std_logic_vector(0 downto 0);
+            probe5  : in std_logic_vector(0 downto 0);
+            probe6  : in std_logic_vector(31 downto 0);
+            probe7  : in std_logic_vector(31 downto 0);
+            probe8  : in std_logic_vector(2 downto 0);
+            probe9  : in std_logic_vector(14 downto 0);
+            probe10 : in std_logic_vector(0 downto 0);
+            probe11 : in std_logic_vector(0 downto 0);
+            probe12 : in std_logic_vector(0 downto 0);
+            probe13 : in std_logic_vector(0 downto 0);
+            probe14 : in std_logic_vector(0 downto 0);
+            probe15 : in std_logic_vector(7 downto 0);
+            probe16 : in std_logic_vector(0 downto 0)
         );
     end component;
     -- -------------------------------------------------------------------------
@@ -119,10 +129,15 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     -- -------------------------------------------------------------------------
     -- ILA CONVERSION SIGNALS
     -- -------------------------------------------------------------------------
-    signal corrected_slv : std_logic_vector(0 downto 0);
-    signal detected_slv  : std_logic_vector(0 downto 0);
-    signal conflict_slv  : std_logic_vector(0 downto 0);
-    signal full_pass_slv : std_logic_vector(0 downto 0);
+    signal cpu_rw_slv          : std_logic_vector(0 downto 0);
+    signal scrub_en_slv        : std_logic_vector(0 downto 0);
+    signal scrub_rw_slv        : std_logic_vector(0 downto 0);
+    signal stat_busy_slv       : std_logic_vector(0 downto 0);
+    signal stat_full_pass_slv  : std_logic_vector(0 downto 0);
+    signal stat_corrected_slv  : std_logic_vector(0 downto 0);
+    signal stat_detected_slv   : std_logic_vector(0 downto 0);
+    signal stat_data_valid_slv : std_logic_vector(0 downto 0);
+    signal stat_conflict_slv   : std_logic_vector(0 downto 0);
 
 begin
 
@@ -222,20 +237,45 @@ begin
     -- -------------------------------------------------------------------------
     -- ILA TO CHECK STATUS SIGNALS
     -- -------------------------------------------------------------------------
-    corrected_slv(0) <= std_logic(stat_corrected_o);
-    detected_slv(0)  <= std_logic(stat_detected_o);
-    conflict_slv(0)  <= std_logic(stat_conflict_o);
-    full_pass_slv(0) <= std_logic(stat_full_pass_o);
+    cpu_rw_slv(0)          <= std_logic(cpu_rw_i);
+    scrub_en_slv(0)        <= std_logic(scrub_en);
+    scrub_rw_slv(0)        <= std_logic(scrub_rw);
+    stat_busy_slv(0)       <= std_logic(stat_busy_o);
+    stat_full_pass_slv(0)  <= std_logic(stat_full_pass_o);
+    stat_corrected_slv(0)  <= std_logic(stat_corrected_o);
+    stat_detected_slv(0)   <= std_logic(stat_detected_o);
+    stat_data_valid_slv(0) <= std_logic(stat_data_valid_o);
+    stat_conflict_slv(0)   <= std_logic(stat_conflict_o);
 
-    ila_scrub_i : ila_scrub
+    -- ILA instance
+    u_ila_scrub : ila_scrub
     port map(
-        clk    => std_logic(clk_i),
-        probe0 => std_logic_vector(stat_state_o), -- state encoded on 3 bits (000Idle, 001IssRead, 010RegRead, 011Dec, 100Check, 101Enc, 110IssWrite)
-        probe1 => corrected_slv,                  -- Pulse showing a correction (1bit) from scrubber
-        probe2 => detected_slv,                   -- Pulse showing a detection (2bit) from scrubber
-        probe3 => conflict_slv,                   -- CPU issues wr on same address as scrubber
-        probe4 => std_logic_vector(flog_count_o), -- Number of detected errors (2bit, unfixable)
-        probe5 => full_pass_slv                   -- Pulse of full revolution done
+        clk => std_logic(clk_i),
+
+        -- ---- CPU transactions (DMEM port A) ----
+        probe0 => cpu_rw_slv,                   -- CPU read/write: '1' = write
+        probe1 => std_logic_vector(cpu_ben_i),  -- CPU byte enables, nonzero = active transaction
+        probe2 => std_logic_vector(cpu_addr_i), -- CPU byte address being accessed
+        probe3 => std_logic_vector(cpu_data_i), -- CPU write data word
+
+        -- ---- Scrubber transactions (DMEM port B) ----
+        probe4 => scrub_en_slv,                  -- scrubber transaction enable
+        probe5 => scrub_rw_slv,                  -- scrubber read/write: '1' = writeback
+        probe6 => std_logic_vector(scrub_wdata), -- scrubber writeback data (corrected word)
+        probe7 => std_logic_vector(scrub_rdata), -- data read from DMEM by the scrubber
+
+        -- ---- FSM internals ----
+        probe8  => std_logic_vector(stat_state_o), -- FSM state (encoded), shows the scrub cycle
+        probe9  => std_logic_vector(stat_addr_o),  -- scrubber pointer as a byte address
+        probe10 => stat_busy_slv,                  -- '1' = scrubber active (not in idle)
+        probe11 => stat_full_pass_slv,             -- pulses '1' at the end of a full revolution
+
+        -- ---- Error / conflict events (use as triggers, rising edge) ----
+        probe12 => stat_corrected_slv,             -- single-bit error corrected this word
+        probe13 => stat_detected_slv,              -- uncorrectable (double-bit) error this word
+        probe14 => stat_data_valid_slv,            -- word checked and found valid
+        probe15 => std_logic_vector(flog_count_o), -- running count of logged (unfixable) errors
+        probe16 => stat_conflict_slv               -- conflict (cpu writing at same addr as scrubber)
     );
 
     -- -------------------------------------------------------------------------

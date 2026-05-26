@@ -432,7 +432,9 @@ begin
 
             when S_ISSUE_READ =>
                 -- issue BRAM read if no conflict, stall otherwise
-                if (conflict = '0') then
+                if (scrub_en_i = '0') then
+                    state_next <= S_IDLE;
+                elsif (conflict = '0') then
                     scrub_en_o <= '1';
                     state_next <= S_REG_READ;
                 end if;
