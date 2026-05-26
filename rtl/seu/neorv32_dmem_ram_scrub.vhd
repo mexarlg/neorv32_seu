@@ -97,6 +97,7 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
             probe16 : in std_logic_vector(0 downto 0)
         );
     end component;
+
     -- -------------------------------------------------------------------------
     -- Memory configuration
     -- -------------------------------------------------------------------------
@@ -113,18 +114,19 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     -- -------------------------------------------------------------------------
     -- Scrubber FSM signals (Port B)
     -- -------------------------------------------------------------------------
-    signal scrub_en    : std_ulogic;
-    signal scrub_rw    : std_ulogic;
-    signal scrub_addr  : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
-    signal scrub_wdata : std_ulogic_vector(31 downto 0);
-    signal scrub_rdata : std_ulogic_vector(31 downto 0);
+    signal scrub_portb_en : std_ulogic;
+    signal scrub_rw       : std_ulogic;
+    signal scrub_addr     : std_ulogic_vector(DMEM_AWIDTH - 1 downto 0);
+    signal scrub_wdata    : std_ulogic_vector(31 downto 0);
+    signal scrub_rdata    : std_ulogic_vector(31 downto 0);
 
     -- -------------------------------------------------------------------------
     -- VIO CDC connection signals
     -- -------------------------------------------------------------------------
-    signal vio_scrub_en_raw  : std_logic_vector(0 downto 0);
-    signal vio_scrub_en_meta : std_ulogic;
-    signal vio_scrub_en_sync : std_ulogic;
+    signal vio_scrub_en_raw    : std_logic_vector(0 downto 0);
+    signal vio_scrub_en_meta   : std_ulogic;
+    signal vio_scrub_en_sync   : std_ulogic;
+    signal scrubber_is_enabled : std_ulogic;
 
     -- -------------------------------------------------------------------------
     -- ILA CONVERSION SIGNALS
@@ -188,14 +190,14 @@ begin
             -- Global control
             clk_i      => clk_i,
             rstn_i     => rstn_i,
-            scrub_en_i => vio_scrub_en_sync,
+            scrub_en_i => scrubber_is_enabled,
             -- CPU write monitoring
             cpu_ben_i  => cpu_ben_i,
             cpu_rw_i   => cpu_rw_i,
             cpu_addr_i => cpu_addr_i,
             cpu_data_i => cpu_data_i,
             -- Port B memory interface
-            scrub_en_o   => scrub_en,
+            scrub_en_o   => scrub_portb_en,
             scrub_rw_o   => scrub_rw,
             scrub_addr_o => scrub_addr,
             scrub_data_o => scrub_wdata,
@@ -234,11 +236,14 @@ begin
         end if;
     end process p_vio_sync;
 
+    -- Allow scrub enable either by vio or software inputs
+    scrubber_is_enabled <= scrub_en_i or vio_scrub_en_sync;
+
     -- -------------------------------------------------------------------------
     -- ILA TO CHECK STATUS SIGNALS
     -- -------------------------------------------------------------------------
     cpu_rw_slv(0)          <= std_logic(cpu_rw_i);
-    scrub_en_slv(0)        <= std_logic(scrub_en);
+    scrub_en_slv(0)        <= std_logic(scrub_portb_en);
     scrub_rw_slv(0)        <= std_logic(scrub_rw);
     stat_busy_slv(0)       <= std_logic(stat_busy_o);
     stat_full_pass_slv(0)  <= std_logic(stat_full_pass_o);
@@ -259,7 +264,7 @@ begin
         probe3 => std_logic_vector(cpu_data_i), -- CPU write data word
 
         -- ---- Scrubber transactions (DMEM port B) ----
-        probe4 => scrub_en_slv,                  -- scrubber transaction enable
+        probe4 => scrub_en_slv,                  -- scrubber port b transaction enable
         probe5 => scrub_rw_slv,                  -- scrubber read/write: '1' = writeback
         probe6 => std_logic_vector(scrub_wdata), -- scrubber writeback data (corrected word)
         probe7 => std_logic_vector(scrub_rdata), -- data read from DMEM by the scrubber

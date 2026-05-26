@@ -54,6 +54,54 @@ architecture neorv32_dmem_rtl of neorv32_dmem is
     constant C_SCRUB_START : natural := 0;
     constant C_SCRUB_END   : natural := 511;
 
+    -- -------------------------------------------------------------------------
+    -- Scrubber control / status signals
+    -- -------------------------------------------------------------------------
+    signal scrub_en         : std_ulogic;
+    signal scrub_flog_clr   : std_ulogic;
+    signal scrub_flog_addr  : std_ulogic_vector(awidth_c - 1 downto 0);
+    signal scrub_flog_cnt   : std_ulogic_vector(7 downto 0);
+    signal scrub_flog_ovf   : std_ulogic;
+    signal scrub_corrected  : std_ulogic;
+    signal scrub_detected   : std_ulogic;
+    signal scrub_state      : std_ulogic_vector(2 downto 0);
+    signal scrub_busy       : std_ulogic;
+    signal scrub_full_pass  : std_ulogic;
+    signal scrub_data_valid : std_ulogic;
+    signal scrub_conflict   : std_ulogic;
+    signal scrub_addr       : std_ulogic_vector(awidth_c - 1 downto 0);
+
+    -- -------------------------------------------------------------------------
+    -- Register mapping for scrubber
+    -- -------------------------------------------------------------------------
+
+    -- Register map
+    --   "00" CTRL   (r/w) : bit0 = scrub_en (on/off scrubber)
+    --                       bit1 = flog_clear   (write 1 = clears flog flags)
+    --                       bit2 = status_clear (write 1 = clears stat flags)
+    --   "01" STATUS (r)   : bit0      = corrected_sticky (a 1 bit error has been corrected)
+    --                       bit1      = detected_sticky (a 2 bit error has been detected)
+    --                       bit2      = full_pass_sticky
+    --                       bit3      = busy
+    --                       bits[6:4] = state
+    --   "10" FLOG   (r)   : bits[7:0] = flog_count (number of detected errors)
+    --                       bit8      = flog_overflow (number of detected errors overflow)
+    --   "11" FADDR  (r)   : flog_last_addr (address at last detected 2 bit error)
+
+    -- Register window decode
+    signal reg_sel   : std_ulogic;                     -- address hits the register window
+    signal reg_sel_q : std_ulogic;                     -- delayed to match RAM read latency
+    signal reg_off   : unsigned(1 downto 0);           -- which of the 4 registers
+    signal reg_rdata : std_ulogic_vector(31 downto 0); -- Register read data
+
+    -- Register write strobes
+    signal status_clr_strobe : std_ulogic;
+
+    -- Sticky event flags
+    signal corrected_sticky : std_ulogic;
+    signal detected_sticky  : std_ulogic;
+    signal full_pass_sticky : std_ulogic;
+
 begin
 
     -- -------------------------------------------------------------------------
@@ -76,28 +124,133 @@ begin
             -- Global control
             clk_i      => clk_i,
             rstn_i     => rstn_i,
-            scrub_en_i => '0',
+            scrub_en_i => scrub_en,
             -- CPU interface
             cpu_ben_i  => ben,
             cpu_rw_i   => bus_req_i.rw,
             cpu_addr_i => bus_req_i.addr(awidth_c - 1 downto 0),
             cpu_data_i => bus_req_i.data,
             cpu_data_o => rdata,
-            -- Fault log (directly active clear for later sw access)
-            flog_clear_i     => '0',
-            flog_last_addr_o => open,
-            flog_count_o     => open,
-            flog_overflow_o  => open,
-            -- Scrubber status (directly active for later sw access)
-            stat_data_valid_o => open,
-            stat_corrected_o  => open,
-            stat_detected_o   => open,
-            stat_state_o      => open,
-            stat_addr_o       => open,
-            stat_conflict_o   => open,
-            stat_busy_o       => open,
-            stat_full_pass_o  => open
+            -- Fault log
+            flog_clear_i     => scrub_flog_clr,
+            flog_last_addr_o => scrub_flog_addr,
+            flog_count_o     => scrub_flog_cnt,
+            flog_overflow_o  => scrub_flog_ovf,
+            -- Scrubber status
+            stat_data_valid_o => scrub_data_valid,
+            stat_corrected_o  => scrub_corrected,
+            stat_detected_o   => scrub_detected,
+            stat_state_o      => scrub_state,
+            stat_addr_o       => scrub_addr,
+            stat_conflict_o   => scrub_conflict,
+            stat_busy_o       => scrub_busy,
+            stat_full_pass_o  => scrub_full_pass
         );
+
+    -- -------------------------------------------------------------------------
+    -- Scrubber register selection given specific address (DMEM_BASE + DMEM_SZ - 16 to DMEM_BASE + DMEM_SZ)
+    -- -------------------------------------------------------------------------
+    reg_sel <= '1' when (unsigned(bus_req_i.addr(awidth_c - 1 downto 4)) =
+        to_unsigned(2 ** (awidth_c - 4) - 1, awidth_c - 4))
+        else
+        '0';
+
+    reg_off <= unsigned(bus_req_i.addr(3 downto 2));
+
+    -- -------------------------------------------------------------------------
+    -- Register write path: CTRL register and write strobes
+    -- -------------------------------------------------------------------------
+    p_reg_wr : process (rstn_i, clk_i)
+    begin
+        if (rstn_i = '0') then
+            scrub_en          <= '0';
+            scrub_flog_clr    <= '0';
+            status_clr_strobe <= '0';
+
+        elsif rising_edge(clk_i) then
+            -- strobes are single cycle
+            scrub_flog_clr    <= '0';
+            status_clr_strobe <= '0';
+
+            if (bus_req_i.stb = '1') and (bus_req_i.rw = '1') and
+                (reg_sel = '1') and (reg_off = "00") then
+                scrub_en          <= bus_req_i.data(0);
+                scrub_flog_clr    <= bus_req_i.data(1);
+                status_clr_strobe <= bus_req_i.data(2);
+            end if;
+        end if;
+    end process p_reg_wr;
+
+    -- -------------------------------------------------------------------------
+    -- Sticky event flags, from pulse to registered, cleared by a CTRL bit2 write
+    -- -------------------------------------------------------------------------
+    p_sticky : process (rstn_i, clk_i)
+    begin
+        if (rstn_i = '0') then
+            corrected_sticky <= '0';
+            detected_sticky  <= '0';
+            full_pass_sticky <= '0';
+
+        elsif rising_edge(clk_i) then
+            -- corrected
+            if (scrub_corrected = '1') then
+                corrected_sticky <= '1';
+            elsif (status_clr_strobe = '1') then
+                corrected_sticky <= '0';
+            end if;
+            -- detected
+            if (scrub_detected = '1') then
+                detected_sticky <= '1';
+            elsif (status_clr_strobe = '1') then
+                detected_sticky <= '0';
+            end if;
+            -- full pass
+            if (scrub_full_pass = '1') then
+                full_pass_sticky <= '1';
+            elsif (status_clr_strobe = '1') then
+                full_pass_sticky <= '0';
+            end if;
+        end if;
+    end process p_sticky;
+
+    -- -------------------------------------------------------------------------
+    -- Register read path (CTRL, STAT, FLOG, FADDR)
+    -- -------------------------------------------------------------------------
+    p_reg_rd : process (rstn_i, clk_i)
+        variable rdata_v : std_ulogic_vector(31 downto 0);
+    begin
+        if (rstn_i = '0') then
+            reg_rdata <= (others => '0');
+            reg_sel_q <= '0';
+
+        elsif rising_edge(clk_i) then
+            reg_sel_q <= reg_sel and bus_req_i.stb and (not bus_req_i.rw);
+
+            rdata_v := (others => '0');
+            case reg_off is
+
+                when "00" => -- CTRL
+                    rdata_v(0) := scrub_en;
+
+                when "01" => -- STATUS
+                    rdata_v(0)          := corrected_sticky;
+                    rdata_v(1)          := detected_sticky;
+                    rdata_v(2)          := full_pass_sticky;
+                    rdata_v(3)          := scrub_busy;
+                    rdata_v(6 downto 4) := scrub_state;
+
+                when "10" => -- FLOG
+                    rdata_v(7 downto 0) := scrub_flog_cnt;
+                    rdata_v(8)          := scrub_flog_ovf;
+
+                when others => -- "11" FADDR
+                    rdata_v(awidth_c - 1 downto 0) := scrub_flog_addr;
+
+            end case;
+
+            reg_rdata <= rdata_v;
+        end if;
+    end process p_reg_rd;
 
     -- -------------------------------------------------------------------------
     -- Bus handshake
@@ -116,7 +269,8 @@ begin
     -- -------------------------------------------------------------------------
     -- Bus response
     -- -------------------------------------------------------------------------
-    bus_rsp_o.data <= rdata when (rden(outreg_c) = '1') else
+    bus_rsp_o.data <= reg_rdata when (reg_sel_q = '1') and (rden(outreg_c) = '1') else
+    rdata when (rden(outreg_c) = '1') else
     (others => '0');
     bus_rsp_o.err <= '0';
     bus_rsp_o.ack <= rden(outreg_c) or wren;
