@@ -49,10 +49,10 @@ architecture neorv32_dmem_rtl of neorv32_dmem is
     signal ben   : std_ulogic_vector(3 downto 0);
 
     -- -------------------------------------------------------------------------
-    -- Scrubber start / end memory word addresses
+    -- Scrubber start / end memory word addresses (519 for sw test with 512 test words filled on dmem)
     -- -------------------------------------------------------------------------
     constant C_SCRUB_START : natural := 0;
-    constant C_SCRUB_END   : natural := ((2 ** awidth_c) / 4) - 1;
+    constant C_SCRUB_END   : natural := 511;
 
 begin
 
