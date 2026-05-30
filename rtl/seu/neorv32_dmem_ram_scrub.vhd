@@ -7,9 +7,6 @@
 -- Collision handling (CPU write + scrubber access to same address) is managed        --
 -- internally by the scrubber FSM. ECC is SECDED for 32-bit words.                   --
 --                                                                                   --
--- The dual port RAM is inferred from a standard VHDL template. Vivado will          --
--- map it to BRAM36 primitives automatically. No vendor IP dependency.               --
---                                                                                   --
 --      Author: Aldo Lupio - 2026                                                    --
 -- -------------------------------------------------------------------------------- --
 -- The NEORV32 RISC-V Processor - https://github.com/stnolting/neorv32               --
@@ -71,7 +68,10 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     component vio_scrub
         port (
             clk        : in std_logic;
-            probe_out0 : out std_logic_vector(0 downto 0)
+            probe_out0 : out std_logic_vector(0 downto 0);
+            probe_out1 : out std_logic_vector(0 downto 0);
+            probe_out2 : out std_logic_vector(DMEM_AWIDTH - 3 downto 0);
+            probe_out3 : out std_logic_vector(31 downto 0)
         );
     end component;
 
@@ -104,6 +104,7 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     constant MEM_DEPTH    : natural := (2 ** DMEM_AWIDTH) / 4;
     constant WORD_ADDR_HI : natural := DMEM_AWIDTH - 1;
     constant WORD_ADDR_LO : natural := 2;
+    constant WORD_IDX_W   : natural := DMEM_AWIDTH - 2; -- word index width
 
     -- -------------------------------------------------------------------------
     -- Word addresses for RAM access
@@ -121,12 +122,37 @@ architecture neorv32_dmem_ram_scrub_rtl of neorv32_dmem_ram_scrub is
     signal scrub_rdata    : std_ulogic_vector(31 downto 0);
 
     -- -------------------------------------------------------------------------
+    -- Port B inputs after the injection mux
+    -- -------------------------------------------------------------------------
+    signal portb_en   : std_ulogic;
+    signal portb_rw   : std_ulogic;
+    signal portb_addr : std_ulogic_vector(WORD_ADDR_HI - WORD_ADDR_LO downto 0);
+    signal portb_data : std_ulogic_vector(31 downto 0);
+
+    -- -------------------------------------------------------------------------
     -- VIO CDC connection signals
     -- -------------------------------------------------------------------------
     signal vio_scrub_en_raw    : std_logic_vector(0 downto 0);
     signal vio_scrub_en_meta   : std_ulogic;
     signal vio_scrub_en_sync   : std_ulogic;
     signal scrubber_is_enabled : std_ulogic;
+
+    -- -------------------------------------------------------------------------
+    -- SEU injection signals from vio
+    -- -------------------------------------------------------------------------
+    signal vio_inj_arm_raw   : std_logic_vector(0 downto 0); -- seu injection enable from vio
+    signal vio_inj_arm_meta  : std_ulogic;                   -- seu injection enable from vio in ulogic
+    signal vio_inj_arm_sync  : std_ulogic;                   -- seu injection enable from vio in ulogic sync
+    signal vio_inj_arm_sync2 : std_ulogic;                   -- seu injection enable from vio in ulogic sync2
+
+    signal vio_inj_addr : std_logic_vector(WORD_IDX_W - 1 downto 0); -- address of seu injection in bram (word index)
+    signal vio_inj_data : std_logic_vector(31 downto 0);             -- data to be written into memory (data pre-known)
+    signal inj_addr     : std_ulogic_vector(WORD_IDX_W - 1 downto 0);-- address of seu injection in bram (word index) converted to ulogic
+    signal inj_data     : std_ulogic_vector(31 downto 0); -- data to be written into memory (data pre-known) converted to ulogic
+
+    signal inj_pending : std_ulogic; -- request of injection asserted, waiting for a free port B
+    signal inj_fire    : std_ulogic; -- drives the injection write in 1 cycle 
+    signal portb_idle  : std_ulogic; -- scrubber not using port B
 
     -- -------------------------------------------------------------------------
     -- ILA CONVERSION SIGNALS
@@ -150,9 +176,21 @@ begin
     addr_b <= scrub_addr(WORD_ADDR_HI downto WORD_ADDR_LO);
 
     -- -------------------------------------------------------------------------
+    -- PORT B BRAM MUX: inj_fire asserted when Port B idle and a request is latched
+    -- -------------------------------------------------------------------------
+    portb_en <= '1' when (inj_fire = '1') else
+        scrub_portb_en;
+    portb_rw <= '1' when (inj_fire = '1') else
+        scrub_rw;
+    portb_addr <= inj_addr when (inj_fire = '1') else
+        addr_b;
+    portb_data <= inj_data when (inj_fire = '1') else
+        scrub_wdata;
+
+    -- -------------------------------------------------------------------------
     -- 4x byte wide true dual port RAMs
     -- Port A: CPU (byte enable controlled via generate index)
-    -- Port B: Scrubber (always full word, gated by scrub_en)
+    -- Port B: Scrubber / Seu injection (scrubber priority)
     -- -------------------------------------------------------------------------
     gen_byte_ram : for i in 0 to 3 generate
         ram_inst : entity neorv32.neorv32_prim_dpram
@@ -168,16 +206,16 @@ begin
                 addr_a_i => addr_a,
                 data_a_i => cpu_data_i(i * 8 + 7 downto i * 8),
                 data_a_o => cpu_data_o(i * 8 + 7 downto i * 8),
-                en_b_i   => scrub_en,
-                rw_b_i   => scrub_rw,
-                addr_b_i => addr_b,
-                data_b_i => scrub_wdata(i * 8 + 7 downto i * 8),
+                en_b_i   => portb_en,
+                rw_b_i   => portb_rw,
+                addr_b_i => portb_addr,
+                data_b_i => portb_data(i * 8 + 7 downto i * 8),
                 data_b_o => scrub_rdata(i * 8 + 7 downto i * 8)
             );
     end generate gen_byte_ram;
 
     -- -------------------------------------------------------------------------
-    -- Scrubber FSM: drives Port B, observes Port A
+    -- Scrubber FSM: drives Port B (via the mux), observes Port A
     -- -------------------------------------------------------------------------
     u_scrub_fsm : entity neorv32.neorv32_scrub_fsm
         generic map(
@@ -219,25 +257,70 @@ begin
         );
 
     -- -------------------------------------------------------------------------
-    -- VIO to scrub_en connection
+    -- VIO: INPUTS REGISTRATION (SEU INJECTION + SCRUBBER ENABLE)
     -- -------------------------------------------------------------------------
     vio_scrub_i : vio_scrub
     port map(
         clk        => clk_i,
-        probe_out0 => vio_scrub_en_raw
+        probe_out0 => vio_scrub_en_raw, --   probe_out0 (1)  : enables scrubbber
+        probe_out1 => vio_inj_arm_raw,  --   probe_out1 (1)  : enables request to issue seu
+        probe_out2 => vio_inj_addr,     --   probe_out2 (13) : word address of seu injection
+        probe_out3 => vio_inj_data      --   probe_out3 (32) : corrupted data to be inserted (seu)
     );
 
-    -- Synchronize the VIO output (already done by vio but just in case, also change to ulogic)
     p_vio_sync : process (clk_i)
     begin
         if rising_edge(clk_i) then
+            -- scrub enable
             vio_scrub_en_meta <= std_ulogic(vio_scrub_en_raw(0));
             vio_scrub_en_sync <= vio_scrub_en_meta;
+            -- inject arm (extra stage used for rising edge detect)
+            vio_inj_arm_meta  <= std_ulogic(vio_inj_arm_raw(0));
+            vio_inj_arm_sync  <= vio_inj_arm_meta;
+            vio_inj_arm_sync2 <= vio_inj_arm_sync;
         end if;
     end process p_vio_sync;
 
-    -- Allow scrub enable either by vio or software inputs
+    -- -------------------------------------------------------------------------
+    -- SEU INJECTION MODULE
+    -- -------------------------------------------------------------------------
     scrubber_is_enabled <= scrub_en_i or vio_scrub_en_sync;
+    portb_idle          <= '1' when (scrub_portb_en = '0' or scrubber_is_enabled = '0') else
+        '0';
+
+    inj_addr <= std_ulogic_vector(vio_inj_addr);
+    inj_data <= std_ulogic_vector(vio_inj_data);
+
+    p_inject : process (rstn_i, clk_i)
+        variable arm_edge   : std_ulogic;
+        variable scrub_word : std_ulogic_vector(WORD_IDX_W - 1 downto 0);
+    begin
+        if (rstn_i = '0') then
+            inj_pending <= '0';
+            inj_fire    <= '0';
+
+        elsif rising_edge(clk_i) then
+            inj_fire <= '0';
+
+            -- rising edge of the synchronized arm bit
+            arm_edge := vio_inj_arm_sync and (not vio_inj_arm_sync2);
+
+            -- seu enable detected, request injection
+            if (arm_edge = '1') then
+                inj_pending <= '1';
+            end if;
+
+            -- update address of seu injection
+            scrub_word := scrub_addr(WORD_ADDR_HI downto WORD_ADDR_LO);
+
+            -- issue injection when port B is idle
+            if (inj_pending = '1') and (portb_idle = '1') and
+                ((scrubber_is_enabled = '0') or (scrub_word /= inj_addr)) then
+                inj_fire    <= '1';
+                inj_pending <= '0';
+            end if;
+        end if;
+    end process p_inject;
 
     -- -------------------------------------------------------------------------
     -- ILA TO CHECK STATUS SIGNALS

@@ -1,16 +1,22 @@
 // ============================================================================
-// main.c - DMEM Background Scrubber
+// main.c - DMEM Background Scrubber - SEU injection validation
 // ----------------------------------------------------------------------------
 // Purpose:
-//   Validates on hardware that the scrubber does not corrupt good data,
-//   exercise the conflict logic with CPU writes, and drive / read the
-//   scrubber through its memory mapped registers (or through VIO)
+//   Prepare memory for deterministic SEU injection (via VIO on port B) and
+//   watch the scrubber detect / correct the injected errors
 //
 // How it works:
-//   1. test_block is an initialized .data array - valid SECDED codewords
-//      after crt0, so the scrubber can run over it safely.
-//   2. The program enables the scrubber via the CTRL register, then loops:
-//      verifies the region, does a CPU write burst, and prints status
+//   1. test_block is filled with a single constant value. Every word becomes
+//      a valid SECDED codeword (the encoder runs on each CPU write).
+//   2. The scrubber is enabled. The loop only verifies and prints status
+//   3. You inject an SEU via VIO. The scrubber finds the mismatch 
+//      on its next pass: (1 bit fixed, 2 bit detected)
+//
+// Injection values:
+//   FILL_VALUE = 0xA5A5A5A5
+//   1-bit SEU (flip bit 0)  : inject_data = 0xA5A5A5A4
+//   2-bit SEU (flip bits 0,1): inject_data = 0xA5A5A5A6
+//   inject_word_addr = WORD INDEX
 //
 // Register block: top 4 words of the DMEM address space.
 //   CTRL   : bit0 = scrub_en, bit1 = flog_clear, bit2 = status_clear
@@ -28,7 +34,7 @@
 // ----------------------------------------------------------------------------
 #define BAUD_RATE      19200
 #define TEST_WORDS     512          // size of the test region, in 32-bit words
-#define CONFLICT_HITS  64           // CPU writes per conflict burst
+#define FILL_VALUE     0xA5A5A5A5u  // constant value written to every word
 
 #define DMEM_BASE      0x80000000u
 #define DMEM_SIZE      (32u * 1024u)            // 32 KB DMEM
@@ -57,49 +63,35 @@
 #define FLOG_OVF(f)    (((f) >> 8) & 0x1u)
 
 volatile uint32_t test_block[TEST_WORDS];   // memory under test (real DMEM)
-uint32_t expected[TEST_WORDS];              // software mirror of expected values
 
 // ----------------------------------------------------------------------------
 // Helper functions
 // ----------------------------------------------------------------------------
 
-// Iterates through all words to write, same with mirror memory
+// Fill every word with the constant value
 void fill_test_block(void)
 {
     for (int i = 0; i < TEST_WORDS; i++) {
-        uint32_t v = 0xA5A50000u + (uint32_t)i;
-        test_block[i] = v;
-        expected[i]   = v;          // keep mirror in sync
+        test_block[i] = FILL_VALUE;
     }
 }
 
-// Iterates through all words checking word in memory is same as mirror word
+// Check every word still holds the constant value. A mismatch means a SEU
 int verify_test_block(void)
 {
     int errors = 0;
 
     for (int i = 0; i < TEST_WORDS; i++) {
         uint32_t got = test_block[i];
-        if (got != expected[i]) {
+        if (got != FILL_VALUE) {
             errors++;
             neorv32_uart0_printf("MISMATCH word %u  addr 0x%x  got 0x%x  exp 0x%x\n",
                                  (uint32_t)i,
                                  (uint32_t)&test_block[i],
-                                 got, expected[i]);
+                                 got, (uint32_t)FILL_VALUE);
         }
     }
     return errors;
-}
-
-// CPU write burst into the scrubber - creates conflicts.
-void cpu_write_burst(uint32_t seed)
-{
-    for (int k = 0; k < CONFLICT_HITS; k++) {
-        int i = (int)((seed + (uint32_t)k) % TEST_WORDS);
-        uint32_t v = 0xC0FFEE00u + seed + (uint32_t)k;
-        test_block[i] = v;          // real CPU write -> DMEM port A
-        expected[i]   = v;          // keep mirror in sync
-    }
 }
 
 // Read and print the scrubber status / fault log registers.
@@ -128,15 +120,16 @@ int main(void)
     // Set up UART0
     neorv32_uart0_setup(BAUD_RATE, 0);
     neorv32_uart0_printf("\n");
-    neorv32_uart0_printf("=== Scrubber test ===\n");
+    neorv32_uart0_printf("=== Scrubber SEU injection test ===\n");
 
-    // Fill the test memory with the known pattern
+    // Fill the test memory with the constant value
     fill_test_block();
 
     // Report the region so it can be cross checked against the scrubber range
     uint32_t base = (uint32_t)&test_block[0];
     uint32_t end  = (uint32_t)&test_block[TEST_WORDS - 1];
-    neorv32_uart0_printf("test_block: %u words\n", (uint32_t)TEST_WORDS);
+    neorv32_uart0_printf("test_block: %u words, fill 0x%x\n",
+                         (uint32_t)TEST_WORDS, (uint32_t)FILL_VALUE);
     neorv32_uart0_printf("  start addr 0x%x  (word index %u)\n",
                          base, (base - DMEM_BASE) / 4u);
     neorv32_uart0_printf("  end   addr 0x%x  (word index %u)\n",
@@ -155,10 +148,10 @@ int main(void)
     // Clear the fault log and any stale sticky flags, then enable the scrubber
     SCRUB_CTRL = CTRL_FLOG_CLEAR | CTRL_STATUS_CLEAR;
     SCRUB_CTRL = CTRL_SCRUB_EN;
-    neorv32_uart0_printf("Scrubber enabled via CTRL register. Monitoring...\n");
+    neorv32_uart0_printf("Scrubber enabled. Inject SEUs via VIO. Monitoring...\n");
 
     // ------------------------------------------------------------------------
-    // Monitoring loop: verify, CPU write burst, print scrubber status.
+    // Monitoring loop: verify and print status only.
     // ------------------------------------------------------------------------
     uint32_t pass = 0;
 
@@ -169,18 +162,15 @@ int main(void)
         if (errors == 0) {
             neorv32_uart0_printf("pass %u: OK\n", pass);
         } else {
-            neorv32_uart0_printf("pass %u: %d MISMATCH(es) - "
-                                 "scrubber corrupted data!\n", pass, errors);
+            neorv32_uart0_printf("pass %u: %d word(s) currently corrupted\n",
+                                 pass, errors);
         }
-
-        // CPU write burst -> collides with the scrubber
-        cpu_write_burst(pass);
 
         // Read and print the scrubber status registers
         print_scrub_status();
 
-        // Clear the event flags so next pass shows fresh events
-        SCRUB_CTRL = CTRL_SCRUB_EN | CTRL_STATUS_CLEAR;
+        // Clear status reg
+        SCRUB_CTRL = CTRL_STATUS_CLEAR;
 
         // delay 200ms so the UART output is readable
         neorv32_aux_delay_ms(NEORV32_SYSINFO->CLK, 200);

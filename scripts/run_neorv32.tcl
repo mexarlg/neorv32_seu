@@ -96,13 +96,22 @@ puts "INFO: Creating VIO core 'vio_scrub'"
 
 create_ip -name vio -vendor xilinx.com -library ip -version 3.0 \
           -module_name vio_scrub
-
+ 
 set_property -dict [list \
-    CONFIG.C_NUM_PROBE_OUT {1} \
-    CONFIG.C_PROBE_OUT0_WIDTH {1} \
-    CONFIG.C_NUM_PROBE_IN {0} ] [get_ips vio_scrub]
-
+    CONFIG.C_NUM_PROBE_IN        {0} \
+    CONFIG.C_NUM_PROBE_OUT       {4} \
+    CONFIG.C_PROBE_OUT0_WIDTH    {1} \
+    CONFIG.C_PROBE_OUT1_WIDTH    {1} \
+    CONFIG.C_PROBE_OUT2_WIDTH    {13} \
+    CONFIG.C_PROBE_OUT3_WIDTH    {32} \
+    CONFIG.C_PROBE_OUT0_INIT_VAL {0x0} \
+    CONFIG.C_PROBE_OUT1_INIT_VAL {0x0} \
+    CONFIG.C_PROBE_OUT2_INIT_VAL {0x0} \
+    CONFIG.C_PROBE_OUT3_INIT_VAL {0x00000000} \
+] [get_ips vio_scrub]
+ 
 generate_target all [get_ips vio_scrub]
+update_compile_order -fileset sources_1
 
 # -----------------------------------------------------------------------------
 # 5c. Generate ILA core for scrubber status monitoring
